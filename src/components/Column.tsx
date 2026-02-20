@@ -3,9 +3,11 @@
  *
  * Shows: column label header with count, scrollable list of bead cards.
  * Uses shadcn ScrollArea for overflow handling.
+ * Wraps card list in AnimatePresence for exit animations.
  */
 
 import type { Stage, BeadState } from "@shared/types";
+import { AnimatePresence } from "framer-motion";
 import { COLUMN_LABELS } from "@/lib/constants";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BeadCard } from "@/components/BeadCard";
@@ -37,7 +39,7 @@ export function Column({ columnId, beads }: ColumnProps) {
       aria-label={`${label} column with ${beads.length} bead${beads.length !== 1 ? "s" : ""}`}
       className={cn(
         "flex w-[240px] min-w-[240px] flex-col rounded-lg border border-t-2 bg-muted/30",
-        accent
+        accent,
       )}
     >
       {/* Column header */}
@@ -52,14 +54,19 @@ export function Column({ columnId, beads }: ColumnProps) {
         )}
       </div>
 
-      {/* Bead list (scrollable) */}
+      {/* Bead list (scrollable, animated) */}
       <ScrollArea className="flex-1">
-        <div role="list" className="flex min-h-[120px] flex-col gap-2 px-2 pb-2">
-          {beads.map((bead) => (
-            <div key={bead.id} role="listitem">
-              <BeadCard bead={bead} />
-            </div>
-          ))}
+        <div
+          role="list"
+          className="flex min-h-[120px] flex-col gap-2 px-2 pb-2"
+        >
+          <AnimatePresence mode="popLayout">
+            {beads.map((bead) => (
+              <div key={bead.id} role="listitem">
+                <BeadCard bead={bead} />
+              </div>
+            ))}
+          </AnimatePresence>
         </div>
       </ScrollArea>
     </div>

@@ -5,9 +5,13 @@
  * reviewer → committer → error → done.
  * Filters beads by stage and passes them to each Column.
  * Horizontal scroll container for narrow screens.
+ *
+ * Wrapped in LayoutGroup to provide a shared layout animation context,
+ * enabling smooth card transitions between columns via Framer Motion layoutId.
  */
 
 import type { Pipeline, BeadState, Stage } from "@shared/types";
+import { LayoutGroup } from "framer-motion";
 import { COLUMNS } from "@/lib/constants";
 import { Column } from "@/components/Column";
 
@@ -34,15 +38,17 @@ export function Board({ pipeline }: BoardProps) {
 
   return (
     <div className="overflow-x-auto pb-2">
-      <div className="flex gap-3">
-        {COLUMNS.map((columnId) => (
-          <Column
-            key={columnId}
-            columnId={columnId}
-            beads={beadsByStage.get(columnId) ?? []}
-          />
-        ))}
-      </div>
+      <LayoutGroup id={pipeline.id}>
+        <div className="flex gap-3">
+          {COLUMNS.map((columnId) => (
+            <Column
+              key={columnId}
+              columnId={columnId}
+              beads={beadsByStage.get(columnId) ?? []}
+            />
+          ))}
+        </div>
+      </LayoutGroup>
     </div>
   );
 }

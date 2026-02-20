@@ -3,10 +3,14 @@
  *
  * Wires up useEventSource + useBoardState to provide real-time
  * Kanban board visualization of all connected projects.
+ *
+ * Wraps everything in MotionConfig with reducedMotion="user" so that
+ * all Framer Motion animations respect the OS-level prefers-reduced-motion setting.
  */
 
 import { useEventSource } from "@/hooks/useEventSource";
 import { useBoardState } from "@/hooks/useBoardState";
+import { MotionConfig } from "framer-motion";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
@@ -25,42 +29,44 @@ export default function App() {
   const isInitialLoad = status === "connecting" && projects.length === 0;
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="min-h-screen bg-background">
-        {/* Global header */}
-        <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center justify-between px-6 py-4">
-            <div>
-              <h1 className="text-xl font-bold text-foreground">
-                OpenCode Dashboard
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Real-time multi-agent pipeline visualization
-              </p>
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider delayDuration={300}>
+        <div className="min-h-screen bg-background">
+          {/* Global header */}
+          <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <div className="flex items-center justify-between px-6 py-4">
+              <div>
+                <h1 className="text-xl font-bold text-foreground">
+                  OpenCode Dashboard
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  Real-time multi-agent pipeline visualization
+                </p>
+              </div>
+              <StatusIndicator status={status} />
             </div>
-            <StatusIndicator status={status} />
-          </div>
-        </header>
+          </header>
 
-        {/* Main content */}
-        <main className="px-6 py-6">
-          {isInitialLoad && <LoadingSkeleton />}
+          {/* Main content */}
+          <main className="px-6 py-6">
+            {isInitialLoad && <LoadingSkeleton />}
 
-          {!isInitialLoad && projects.length === 0 && <EmptyState />}
+            {!isInitialLoad && projects.length === 0 && <EmptyState />}
 
-          {projects.length > 0 && (
-            <div className="space-y-2">
-              {projects.map((project, index) => (
-                <div key={project.projectPath}>
-                  {index > 0 && <Separator className="my-4" />}
-                  <ProjectSection project={project} />
-                </div>
-              ))}
-            </div>
-          )}
-        </main>
-      </div>
-    </TooltipProvider>
+            {projects.length > 0 && (
+              <div className="space-y-2">
+                {projects.map((project, index) => (
+                  <div key={project.projectPath}>
+                    {index > 0 && <Separator className="my-4" />}
+                    <ProjectSection project={project} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+        </div>
+      </TooltipProvider>
+    </MotionConfig>
   );
 }
 

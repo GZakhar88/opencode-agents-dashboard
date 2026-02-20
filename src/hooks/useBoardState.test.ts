@@ -978,9 +978,8 @@ describe("boardReducer", () => {
 
     it("re-activates an existing pipeline and updates title", () => {
       const state = makeStateWithBead("bead-1", {}, "pipe-1");
-      state.projects
-        .get("/test/project")!
-        .pipelines.get("pipe-1")!.status = "done";
+      state.projects.get("/test/project")!.pipelines.get("pipe-1")!.status =
+        "done";
 
       const result = boardReducer(state, {
         type: "PIPELINE_STARTED",
@@ -1417,6 +1416,350 @@ describe("boardReducer", () => {
       expect(finalBead.stage).toBe("done");
       expect(finalBead.bdStatus).toBe("closed");
       expect(finalBead.completedAt).toBeDefined();
+    });
+
+    it("handles discover → claim → stage → error sequence", () => {
+      const bead = makeBeadRecord({ id: "error-bead", status: "open" });
+      let state = initialState;
+
+      // Discover
+      state = boardReducer(state, {
+        type: "BEAD_DISCOVERED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          bead,
+          pipelineId: "pipe-1",
+        },
+      });
+      expect(
+        state.projects
+          .get("/test/project")!
+          .pipelines.get("pipe-1")!
+          .beads.get("error-bead")!.stage,
+      ).toBe("backlog");
+
+      // Claim
+      state = boardReducer(state, {
+        type: "BEAD_CLAIMED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "error-bead",
+          bead,
+          stage: "orchestrator",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      // Stage → builder with active agent
+      state = boardReducer(state, {
+        type: "BEAD_STAGE",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "error-bead",
+          stage: "builder",
+          agentSessionId: "builder-session",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      // Error — agent timeout during builder stage
+      state = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "error-bead",
+          error: "agent timeout",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const errorBead = state.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("error-bead")!;
+      expect(errorBead.stage).toBe("error");
+      expect(errorBead.error).toBe("agent timeout");
+      // Agent session should be preserved (was set before error)
+      expect(errorBead.agentSessionId).toBe("builder-session");
+    });
+
+    it("handles error from any stage (orchestrator → error)", () => {
+      const bead = makeBeadRecord({ id: "orch-err", status: "open" });
+      let state = initialState;
+
+      // Discover + Claim
+      state = boardReducer(state, {
+        type: "BEAD_DISCOVERED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          bead,
+          pipelineId: "pipe-1",
+        },
+      });
+      state = boardReducer(state, {
+        type: "BEAD_CLAIMED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "orch-err",
+          bead,
+          stage: "orchestrator",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      // Error from orchestrator — bead abandoned
+      state = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "orch-err",
+          error: "abandoned",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const errBead = state.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("orch-err")!;
+      expect(errBead.stage).toBe("error");
+      expect(errBead.error).toBe("abandoned");
+    });
+
+    it("handles error from committer stage", () => {
+      const state = makeStateWithBead("bead-1", {
+        stage: "committer",
+        agentSessionId: "committer-session",
+      });
+      state.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!.currentBeadId = "bead-1";
+
+      const result = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          error: "commit hook failed",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const bead = result.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("bead-1")!;
+      expect(bead.stage).toBe("error");
+      expect(bead.error).toBe("commit hook failed");
+      // currentBeadId should be cleared on error
+      expect(
+        result.projects.get("/test/project")!.pipelines.get("pipe-1")!
+          .currentBeadId,
+      ).toBeNull();
+    });
+
+    it("handles blocked bead discovered → appears in error column", () => {
+      const bead = makeBeadRecord({
+        id: "blocked-bead",
+        status: "blocked",
+        title: "Blocked Task",
+      });
+
+      const state = boardReducer(initialState, {
+        type: "BEAD_DISCOVERED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          bead,
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const beadState = state.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("blocked-bead")!;
+      expect(beadState.stage).toBe("error");
+      expect(beadState.title).toBe("Blocked Task");
+    });
+
+    it("handles error with close reason from bead record", () => {
+      const state = makeStateWithBead("bead-1", {
+        stage: "reviewer",
+        bdStatus: "in_progress",
+      });
+
+      const result = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          bead: makeBeadRecord({
+            id: "bead-1",
+            status: "closed",
+            close_reason: "failed_review",
+          }),
+          error: "Review failed: code quality issues detected",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const bead = result.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("bead-1")!;
+      expect(bead.stage).toBe("error");
+      expect(bead.error).toBe("Review failed: code quality issues detected");
+      expect(bead.bdStatus).toBe("closed");
+    });
+
+    it("error bead does not auto-progress on BEAD_STAGE to invalid stage", () => {
+      const state = makeStateWithBead("bead-1", {
+        stage: "error",
+        error: "Something failed",
+      });
+
+      // Attempting to set stage to "designer" (invalid) should be rejected
+      const result = boardReducer(state, {
+        type: "BEAD_STAGE",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          stage: "designer" as any,
+          pipelineId: "pipe-1",
+        },
+      });
+
+      // Should still be in error
+      const bead = result.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("bead-1")!;
+      expect(bead.stage).toBe("error");
+      expect(bead.error).toBe("Something failed");
+    });
+
+    it("error bead can be moved back to a valid stage (recovery)", () => {
+      const state = makeStateWithBead("bead-1", {
+        stage: "error",
+        error: "Build failed",
+      });
+
+      // A valid BEAD_STAGE can move the bead out of error (retry scenario)
+      const result = boardReducer(state, {
+        type: "BEAD_STAGE",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          stage: "builder",
+          agentSessionId: "retry-session",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const bead = result.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("bead-1")!;
+      expect(bead.stage).toBe("builder");
+      expect(bead.agentSessionId).toBe("retry-session");
+      // Error field persists (it's metadata) — it's up to the UI to check stage
+      expect(bead.error).toBe("Build failed");
+    });
+
+    it("error bead can be completed via BEAD_DONE (resolves error)", () => {
+      const state = makeStateWithBead("bead-1", {
+        stage: "error",
+        error: "Transient failure",
+        agentSessionId: "old-session",
+      });
+
+      const result = boardReducer(state, {
+        type: "BEAD_DONE",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          bead: makeBeadRecord({ id: "bead-1", status: "closed" }),
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const bead = result.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!
+        .beads.get("bead-1")!;
+      expect(bead.stage).toBe("done");
+      expect(bead.error).toBeUndefined();
+      expect(bead.agentSessionId).toBeUndefined();
+      expect(bead.completedAt).toBeDefined();
+    });
+
+    it("multiple beads can be in error state simultaneously", () => {
+      let state = initialState;
+
+      // Add two beads
+      state = boardReducer(state, {
+        type: "BEAD_DISCOVERED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          bead: makeBeadRecord({ id: "bead-1", status: "open" }),
+          pipelineId: "pipe-1",
+        },
+      });
+      state = boardReducer(state, {
+        type: "BEAD_DISCOVERED",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          bead: makeBeadRecord({ id: "bead-2", status: "open" }),
+          pipelineId: "pipe-1",
+        },
+      });
+
+      // Error both
+      state = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-1",
+          error: "Build failed",
+          pipelineId: "pipe-1",
+        },
+      });
+      state = boardReducer(state, {
+        type: "BEAD_ERROR",
+        payload: {
+          projectPath: "/test/project",
+          timestamp: Date.now(),
+          beadId: "bead-2",
+          error: "Review timeout",
+          pipelineId: "pipe-1",
+        },
+      });
+
+      const pipeline = state.projects
+        .get("/test/project")!
+        .pipelines.get("pipe-1")!;
+      const bead1 = pipeline.beads.get("bead-1")!;
+      const bead2 = pipeline.beads.get("bead-2")!;
+      expect(bead1.stage).toBe("error");
+      expect(bead1.error).toBe("Build failed");
+      expect(bead2.stage).toBe("error");
+      expect(bead2.error).toBe("Review timeout");
     });
   });
 });

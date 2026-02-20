@@ -2,12 +2,14 @@
  * Column — Single Kanban column displaying beads for one pipeline stage.
  *
  * Shows: column label header with count, scrollable list of bead cards.
+ * Error column gets distinct warning styling for high visibility.
  * Uses shadcn ScrollArea for overflow handling.
  * Wraps card list in AnimatePresence for exit animations.
  */
 
 import type { Stage, BeadState } from "@shared/types";
 import { AnimatePresence } from "framer-motion";
+import { AlertTriangle } from "lucide-react";
 import { COLUMN_LABELS } from "@/lib/constants";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BeadCard } from "@/components/BeadCard";
@@ -33,6 +35,11 @@ const COLUMN_ACCENT: Partial<Record<Stage, string>> = {
 export function Column({ columnId, beads }: ColumnProps) {
   const label = COLUMN_LABELS[columnId];
   const accent = COLUMN_ACCENT[columnId] ?? "border-t-border";
+  const isErrorColumn = columnId === "error";
+  const hasErrors = isErrorColumn && beads.length > 0;
+
+  /** Shared color for error column text (icon, heading, badge) */
+  const headerColor = hasErrors ? "text-red-400" : "text-muted-foreground";
 
   return (
     <div
@@ -40,15 +47,38 @@ export function Column({ columnId, beads }: ColumnProps) {
       className={cn(
         "flex w-[240px] min-w-[240px] flex-col rounded-lg border border-t-2 bg-muted/30",
         accent,
+        hasErrors && "border-red-500/30 bg-red-500/[0.03]",
       )}
     >
       {/* Column header */}
       <div className="flex items-center justify-between px-3 py-2.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {label}
-        </h3>
+        <div className="flex items-center gap-1.5">
+          {isErrorColumn && (
+            <AlertTriangle
+              className={cn(
+                "h-3.5 w-3.5",
+                hasErrors ? headerColor : "text-muted-foreground/50",
+              )}
+            />
+          )}
+          <h3
+            className={cn(
+              "text-xs font-semibold uppercase tracking-wider",
+              headerColor,
+            )}
+          >
+            {label}
+          </h3>
+        </div>
         {beads.length > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+          <span
+            className={cn(
+              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-medium",
+              hasErrors
+                ? "bg-red-500/15 text-red-400"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
             {beads.length}
           </span>
         )}

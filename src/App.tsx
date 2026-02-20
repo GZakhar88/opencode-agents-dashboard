@@ -10,6 +10,8 @@
  * - ReconnectBanner: visible reconnection/disconnection notification
  */
 
+import { useState, useEffect } from "react";
+import type { ProjectState } from "@shared/types";
 import { useEventSource } from "@/hooks/useEventSource";
 import { useBoardState } from "@/hooks/useBoardState";
 import { MotionConfig } from "framer-motion";
@@ -20,7 +22,7 @@ import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import { Link2Off, ServerOff } from "lucide-react";
+import { Link2Off, ServerOff, ChevronDown, ChevronUp } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +32,22 @@ export default function App() {
       <DashboardApp />
     </ErrorBoundary>
   );
+}
+
+/**
+ * Check if a project is completed (has zero non-done beads).
+ * A completed project is one where all beads are in "done" stage,
+ * or has no beads at all.
+ */
+function isProjectCompleted(project: ProjectState): boolean {
+  for (const pipeline of project.pipelines.values()) {
+    for (const bead of pipeline.beads.values()) {
+      if (bead.stage !== "done") {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -43,7 +61,26 @@ function DashboardApp() {
     onEvent: dispatch,
   });
 
+  // Toggle state for showing/hiding completed projects (persisted to localStorage)
+  const [showCompleted, setShowCompleted] = useState(() => {
+    const stored = localStorage.getItem("dashboard:showCompleted");
+    return stored === "true";
+  });
+
+  // Persist toggle state to localStorage
+  useEffect(() => {
+    localStorage.setItem("dashboard:showCompleted", String(showCompleted));
+  }, [showCompleted]);
+
   const projects = Array.from(state.projects.values());
+  
+  // Split projects into active and completed
+  const activeProjects = projects.filter((p) => !isProjectCompleted(p));
+  const completedProjects = projects.filter((p) => isProjectCompleted(p));
+  
+  // Projects to display based on toggle state
+  const displayedProjects = showCompleted ? projects : activeProjects;
+  
   const isInitialLoad = status === "connecting" && projects.length === 0;
 
   // Detect permanent failure: disconnected with no data
@@ -67,6 +104,40 @@ function DashboardApp() {
               </div>
               <StatusIndicator status={status} />
             </div>
+            
+            {/* Completed projects toggle — shown when there are completed projects */}
+            {completedProjects.length > 0 && (
+              <div className="border-t px-6 py-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleted(!showCompleted)}
+                  className={cn(
+                    "inline-flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                    FOCUS_RING,
+                  )}
+                >
+                  {showCompleted ? (
+                    <>
+                      <ChevronUp className="h-3 w-3" />
+                      <span>
+                        Showing {completedProjects.length} completed project
+                        {completedProjects.length !== 1 ? "s" : ""}
+                      </span>
+                      <span className="text-muted-foreground/70">(Hide)</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-3 w-3" />
+                      <span>
+                        {completedProjects.length} completed project
+                        {completedProjects.length !== 1 ? "s" : ""} hidden
+                      </span>
+                      <span className="text-muted-foreground/70">(Show)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </header>
 
           {/* Reconnection banner — slides in below header when connection is lost */}
@@ -84,9 +155,9 @@ function DashboardApp() {
               !isPermanentlyDisconnected &&
               projects.length === 0 && <EmptyState />}
 
-            {projects.length > 0 && (
+            {displayedProjects.length > 0 && (
               <div className="space-y-2">
-                {projects.map((project, index) => (
+                {displayedProjects.map((project, index) => (
                   <div key={project.projectPath}>
                     {index > 0 && <Separator className="my-4" />}
                     <ProjectSection project={project} />

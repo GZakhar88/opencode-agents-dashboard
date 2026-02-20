@@ -5,6 +5,7 @@
  * reviewer → committer → error → done.
  * Filters beads by stage and passes them to each Column.
  * Horizontal scroll container for narrow screens.
+ * Supports compact mode (1 card height) and expanded mode (full height).
  *
  * Wrapped in LayoutGroup to provide a shared layout animation context,
  * enabling smooth card transitions between columns via Framer Motion layoutId.
@@ -17,9 +18,10 @@ import { Column } from "@/components/Column";
 
 interface BoardProps {
   pipeline: Pipeline;
+  isExpanded: boolean;
 }
 
-export function Board({ pipeline }: BoardProps) {
+export function Board({ pipeline, isExpanded }: BoardProps) {
   // Group beads by stage
   const beadsByStage = new Map<Stage, BeadState[]>();
   for (const columnId of COLUMNS) {
@@ -45,6 +47,7 @@ export function Board({ pipeline }: BoardProps) {
               key={columnId}
               columnId={columnId}
               beads={beadsByStage.get(columnId) ?? []}
+              isCompact={!isExpanded}
             />
           ))}
         </div>

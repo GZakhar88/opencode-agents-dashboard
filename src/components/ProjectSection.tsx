@@ -29,6 +29,40 @@ interface ProjectSectionProps {
 export function ProjectSection({ project }: ProjectSectionProps) {
   const [isOpen, setIsOpen] = useState(true);
   const pipelines = Array.from(project.pipelines.values());
+  
+  // Track expanded/compact state per pipeline (default: compact)
+  const [expandedPipelines, setExpandedPipelines] = useState<Set<string>>(() => {
+    // Load from localStorage
+    const stored = localStorage.getItem("dashboard:expandedPipelines");
+    if (stored) {
+      try {
+        return new Set(JSON.parse(stored));
+      } catch {
+        return new Set();
+      }
+    }
+    return new Set();
+  });
+  
+  // Persist to localStorage when state changes
+  useEffect(() => {
+    localStorage.setItem(
+      "dashboard:expandedPipelines",
+      JSON.stringify(Array.from(expandedPipelines))
+    );
+  }, [expandedPipelines]);
+  
+  const togglePipeline = (pipelineId: string) => {
+    setExpandedPipelines((prev) => {
+      const next = new Set(prev);
+      if (next.has(pipelineId)) {
+        next.delete(pipelineId);
+      } else {
+        next.add(pipelineId);
+      }
+      return next;
+    });
+  };
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -82,8 +116,15 @@ export function ProjectSection({ project }: ProjectSectionProps) {
             pipelines.map((pipeline, index) => (
               <div key={pipeline.id}>
                 {index > 0 && <Separator className="my-3" />}
-                <PipelineHeader pipeline={pipeline} />
-                <Board pipeline={pipeline} />
+                <PipelineHeader 
+                  pipeline={pipeline}
+                  isExpanded={expandedPipelines.has(pipeline.id)}
+                  onToggle={() => togglePipeline(pipeline.id)}
+                />
+                <Board 
+                  pipeline={pipeline}
+                  isExpanded={expandedPipelines.has(pipeline.id)}
+                />
               </div>
             ))
           )}

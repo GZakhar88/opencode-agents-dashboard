@@ -108,7 +108,9 @@ export function BeadCard({ bead }: BeadCardProps) {
 
         {/* Bottom row: elapsed time + error indicator */}
         <div className="flex items-center justify-between">
-          <ElapsedTime startTime={bead.stageStartedAt} />
+          {bead.stage !== "backlog" && bead.stage !== "done" && (
+            <ElapsedTime startTime={bead.stageStartedAt} />
+          )}
           {isError && (
             <span className="flex items-center gap-1 text-[10px] font-medium text-red-400">
               <AlertCircle className="h-3 w-3" />

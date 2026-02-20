@@ -1,9 +1,10 @@
 /**
  * Column — Single Kanban column displaying beads for one pipeline stage.
  *
- * Shows: column label header with count, scrollable list of bead cards.
+ * Shows: column label header with count, list of bead cards.
+ * In compact mode, only the first bead is shown.
+ * In expanded mode, all beads are shown at natural height.
  * Error column gets distinct warning styling for high visibility.
- * Uses shadcn ScrollArea for overflow handling.
  * Wraps card list in AnimatePresence for exit animations.
  */
 
@@ -11,13 +12,13 @@ import type { Stage, BeadState } from "@shared/types";
 import { AnimatePresence } from "framer-motion";
 import { AlertTriangle } from "lucide-react";
 import { COLUMN_LABELS } from "@/lib/constants";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { BeadCard } from "@/components/BeadCard";
 import { cn } from "@/lib/utils";
 
 interface ColumnProps {
   columnId: Stage;
   beads: BeadState[];
+  isCompact: boolean;
 }
 
 /** Column header accent colors for visual distinction */
@@ -32,7 +33,7 @@ const COLUMN_ACCENT: Partial<Record<Stage, string>> = {
   done: "border-t-green-500",
 };
 
-export function Column({ columnId, beads }: ColumnProps) {
+export function Column({ columnId, beads, isCompact }: ColumnProps) {
   const label = COLUMN_LABELS[columnId];
   const accent = COLUMN_ACCENT[columnId] ?? "border-t-border";
   const isErrorColumn = columnId === "error";
@@ -40,6 +41,9 @@ export function Column({ columnId, beads }: ColumnProps) {
 
   /** Shared color for error column text (icon, heading, badge) */
   const headerColor = hasErrors ? "text-red-400" : "text-muted-foreground";
+
+  // In compact mode, only show the first bead
+  const visibleBeads = isCompact ? beads.slice(0, 1) : beads;
 
   return (
     <div
@@ -84,21 +88,19 @@ export function Column({ columnId, beads }: ColumnProps) {
         )}
       </div>
 
-      {/* Bead list (scrollable, animated) */}
-      <ScrollArea className="max-h-[calc(100vh-220px)] flex-1">
-        <div
-          role="list"
-          className="flex min-h-[120px] flex-col gap-2 px-2 pb-2"
-        >
-          <AnimatePresence mode="popLayout">
-            {beads.map((bead) => (
-              <div key={bead.id} role="listitem">
-                <BeadCard bead={bead} />
-              </div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </ScrollArea>
+      {/* Bead list */}
+      <div
+        role="list"
+        className="flex flex-col gap-2 px-2 pb-2"
+      >
+        <AnimatePresence mode="popLayout">
+          {visibleBeads.map((bead) => (
+            <div key={bead.id} role="listitem">
+              <BeadCard bead={bead} />
+            </div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

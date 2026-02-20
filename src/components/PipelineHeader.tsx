@@ -1,16 +1,20 @@
 /**
  * PipelineHeader — Pipeline title and status badge.
  *
- * Displays: pipeline title, status badge (LIVE/IDLE/DONE).
+ * Displays: pipeline title, status badge (LIVE/IDLE/DONE), expand/collapse toggle.
  * Status colors: active=green, idle=gray, done=blue.
  */
 
 import type { Pipeline, PipelineStatus } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
 interface PipelineHeaderProps {
   pipeline: Pipeline;
+  isExpanded: boolean;
+  onToggle: () => void;
 }
 
 const STATUS_CONFIG: Record<
@@ -31,11 +35,33 @@ const STATUS_CONFIG: Record<
   },
 };
 
-export function PipelineHeader({ pipeline }: PipelineHeaderProps) {
+export function PipelineHeader({ pipeline, isExpanded, onToggle }: PipelineHeaderProps) {
   const config = STATUS_CONFIG[pipeline.status] ?? STATUS_CONFIG.idle;
 
   return (
     <div className="flex items-center gap-3 py-2">
+      {/* Expand/collapse toggle button */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          FOCUS_RING,
+        )}
+        aria-label={isExpanded ? "Collapse board" : "Expand board"}
+      >
+        {isExpanded ? (
+          <>
+            <ChevronUp className="h-3 w-3" />
+            <span>Collapse</span>
+          </>
+        ) : (
+          <>
+            <ChevronDown className="h-3 w-3" />
+            <span>Expand</span>
+          </>
+        )}
+      </button>
       <h3 className="text-sm font-medium text-foreground">
         {pipeline.title}
       </h3>

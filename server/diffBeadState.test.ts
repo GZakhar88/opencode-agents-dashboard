@@ -373,3 +373,99 @@ describe("diffBeadState", () => {
     expect(result[0].type).toBe("changed");
   });
 });
+
+// ─── Pipeline stage helper functions (duplicated from dashboard-bridge.ts) ─
+
+function mapSubagentTypeToStage(agentType: string): string | null {
+  const mapping: Record<string, string> = {
+    "pipeline-builder": "builder",
+    "pipeline-refactor": "refactor",
+    "pipeline-reviewer": "reviewer",
+    "pipeline-committer": "committer",
+    builder: "builder",
+    refactor: "refactor",
+    reviewer: "reviewer",
+    committer: "committer",
+    designer: "designer",
+  };
+  return mapping[agentType] ?? null;
+}
+
+function extractBeadId(text: string): string | null {
+  const match = text.match(/\[([a-zA-Z0-9][\w-]*)\]/);
+  return match ? match[1] : null;
+}
+
+// ─── Tests for mapSubagentTypeToStage ──────────────────────────
+
+describe("mapSubagentTypeToStage", () => {
+  it("maps pipeline-prefixed agent names to stage names", () => {
+    expect(mapSubagentTypeToStage("pipeline-builder")).toBe("builder");
+    expect(mapSubagentTypeToStage("pipeline-refactor")).toBe("refactor");
+    expect(mapSubagentTypeToStage("pipeline-reviewer")).toBe("reviewer");
+    expect(mapSubagentTypeToStage("pipeline-committer")).toBe("committer");
+  });
+
+  it("maps bare agent names to stage names", () => {
+    expect(mapSubagentTypeToStage("builder")).toBe("builder");
+    expect(mapSubagentTypeToStage("refactor")).toBe("refactor");
+    expect(mapSubagentTypeToStage("reviewer")).toBe("reviewer");
+    expect(mapSubagentTypeToStage("committer")).toBe("committer");
+  });
+
+  it("maps designer agent to designer stage", () => {
+    expect(mapSubagentTypeToStage("designer")).toBe("designer");
+  });
+
+  it("returns null for unknown agent types", () => {
+    expect(mapSubagentTypeToStage("unknown-agent")).toBeNull();
+    expect(mapSubagentTypeToStage("")).toBeNull();
+    expect(mapSubagentTypeToStage("orchestrator")).toBeNull();
+    expect(mapSubagentTypeToStage("pipeline-orchestrator")).toBeNull();
+  });
+
+  it("is case-sensitive (agent names come from config, should be exact)", () => {
+    expect(mapSubagentTypeToStage("Pipeline-Builder")).toBeNull();
+    expect(mapSubagentTypeToStage("BUILDER")).toBeNull();
+    expect(mapSubagentTypeToStage("Builder")).toBeNull();
+  });
+});
+
+// ─── Tests for extractBeadId ───────────────────────────────────
+
+describe("extractBeadId", () => {
+  it("extracts bead ID from bracketed format", () => {
+    expect(extractBeadId("Build: [bd-a1b2] Add auth middleware")).toBe("bd-a1b2");
+  });
+
+  it("extracts bead ID with complex format", () => {
+    expect(extractBeadId("[opencode-dashboard-bom] Pipeline stage detection")).toBe("opencode-dashboard-bom");
+  });
+
+  it("extracts first bead ID when multiple brackets present", () => {
+    expect(extractBeadId("[bd-a1] first [bd-b2] second")).toBe("bd-a1");
+  });
+
+  it("returns null when no bracketed ID is present", () => {
+    expect(extractBeadId("Build the auth middleware")).toBeNull();
+    expect(extractBeadId("")).toBeNull();
+  });
+
+  it("does not match empty brackets", () => {
+    expect(extractBeadId("Build [] something")).toBeNull();
+  });
+
+  it("does not match brackets starting with non-alphanumeric", () => {
+    expect(extractBeadId("Build [-invalid] something")).toBeNull();
+    expect(extractBeadId("Build [_invalid] something")).toBeNull();
+  });
+
+  it("handles IDs with underscores and numbers", () => {
+    expect(extractBeadId("[task_123] Do something")).toBe("task_123");
+    expect(extractBeadId("[a1b2c3] Fix the thing")).toBe("a1b2c3");
+  });
+
+  it("handles IDs with hyphens throughout", () => {
+    expect(extractBeadId("[my-project-bead-1] Implement feature")).toBe("my-project-bead-1");
+  });
+});

@@ -25,6 +25,7 @@ import type {
   PipelineStatus,
   SSEEventType,
   SSEStateFullPayload,
+  SSEProjectConnectedPayload,
   SSEProjectDisconnectedPayload,
   BeadDiscoveredPayload,
   BeadClaimedPayload,
@@ -56,6 +57,7 @@ type WithPipelineId<T> = T & { pipelineId?: string };
  */
 type BoardAction =
   | { type: "STATE_FULL"; payload: SSEStateFullPayload }
+  | { type: "PROJECT_CONNECTED"; payload: SSEProjectConnectedPayload }
   | { type: "BEAD_DISCOVERED"; payload: WithPipelineId<BeadDiscoveredPayload> }
   | { type: "BEAD_CLAIMED"; payload: WithPipelineId<BeadClaimedPayload> }
   | { type: "BEAD_STAGE"; payload: WithPipelineId<BeadStagePayload> }
@@ -359,6 +361,39 @@ function boardReducer(
     // ----- Full state replacement (reconnect / initial load) -----
     case "STATE_FULL": {
       return deserializeStateFull(action.payload);
+    }
+
+    // ----- Project connected — mark project as online -----
+    case "PROJECT_CONNECTED": {
+      const { projectPath, projectName, pluginId } = action.payload;
+      if (!projectPath) return state;
+
+      const newProjects = cloneMap(state.projects);
+      const existing = newProjects.get(projectPath);
+
+      if (existing) {
+        // Re-activate existing project
+        newProjects.set(projectPath, {
+          ...existing,
+          pipelines: cloneMap(existing.pipelines),
+          connected: true,
+          lastHeartbeat: Date.now(),
+          pluginId,
+        });
+      } else {
+        // First time seeing this project
+        newProjects.set(projectPath, {
+          projectPath,
+          projectName: projectName || projectPath.split("/").pop() || projectPath,
+          pluginId,
+          lastHeartbeat: Date.now(),
+          connected: true,
+          pipelines: new Map(),
+          lastBeadSnapshot: [],
+        });
+      }
+
+      return { projects: newProjects };
     }
 
     // ----- Bead discovered — add to backlog -----
@@ -688,6 +723,7 @@ function boardReducer(
  */
 const SSE_TO_ACTION: Partial<Record<SSEEventType, BoardAction["type"]>> = {
   "state:full": "STATE_FULL",
+  "project:connected": "PROJECT_CONNECTED",
   "bead:discovered": "BEAD_DISCOVERED",
   "bead:claimed": "BEAD_CLAIMED",
   "bead:stage": "BEAD_STAGE",

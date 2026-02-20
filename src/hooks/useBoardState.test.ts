@@ -1075,6 +1075,155 @@ describe("boardReducer", () => {
   });
 
   // ----------------------------------------------------------
+  // PROJECT_CONNECTED
+  // ----------------------------------------------------------
+  describe("PROJECT_CONNECTED", () => {
+    it("creates a new project when not previously seen", () => {
+      const result = boardReducer(initialState, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "plugin-new",
+          projectPath: "/new/project",
+          projectName: "new-project",
+        },
+      });
+
+      expect(result.projects.size).toBe(1);
+      const project = result.projects.get("/new/project")!;
+      expect(project.projectName).toBe("new-project");
+      expect(project.pluginId).toBe("plugin-new");
+      expect(project.connected).toBe(true);
+      expect(project.lastHeartbeat).toBeGreaterThan(0);
+      expect(project.pipelines.size).toBe(0);
+      expect(project.lastBeadSnapshot).toEqual([]);
+    });
+
+    it("re-activates an existing disconnected project", () => {
+      // Start with a disconnected project that has beads
+      const state = makeStateWithBead("bead-1", { stage: "builder" });
+      state.projects.get("/test/project")!.connected = false;
+      state.projects.get("/test/project")!.pluginId = "old-plugin";
+
+      const result = boardReducer(state, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "new-plugin",
+          projectPath: "/test/project",
+          projectName: "project",
+        },
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.connected).toBe(true);
+      expect(project.pluginId).toBe("new-plugin");
+      expect(project.lastHeartbeat).toBeGreaterThan(0);
+      // Pipelines and beads should be preserved
+      expect(project.pipelines.size).toBe(1);
+      expect(project.pipelines.get("pipe-1")!.beads.has("bead-1")).toBe(true);
+      expect(project.pipelines.get("pipe-1")!.beads.get("bead-1")!.stage).toBe(
+        "builder",
+      );
+    });
+
+    it("updates pluginId and lastHeartbeat on reconnect", () => {
+      const state = makeStateWithBead("bead-1");
+      const oldHeartbeat = state.projects.get("/test/project")!.lastHeartbeat;
+
+      const result = boardReducer(state, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "updated-plugin",
+          projectPath: "/test/project",
+          projectName: "project",
+        },
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.pluginId).toBe("updated-plugin");
+      expect(project.lastHeartbeat).toBeGreaterThanOrEqual(oldHeartbeat);
+    });
+
+    it("returns state unchanged when projectPath is empty", () => {
+      const result = boardReducer(initialState, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "p1",
+          projectPath: "",
+          projectName: "test",
+        },
+      });
+
+      expect(result).toBe(initialState);
+    });
+
+    it("derives projectName from path when projectName is empty", () => {
+      const result = boardReducer(initialState, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "p1",
+          projectPath: "/users/dev/my-app",
+          projectName: "",
+        },
+      });
+
+      const project = result.projects.get("/users/dev/my-app")!;
+      expect(project.projectName).toBe("my-app");
+    });
+
+    it("produces new Map references (immutability)", () => {
+      const state = makeStateWithBead("bead-1");
+      const result = boardReducer(state, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "new-plugin",
+          projectPath: "/test/project",
+          projectName: "project",
+        },
+      });
+
+      // Projects Map should be a new reference
+      expect(result.projects).not.toBe(state.projects);
+      // Pipelines Map should be a new reference
+      const oldPipelines = state.projects.get("/test/project")!.pipelines;
+      const newPipelines = result.projects.get("/test/project")!.pipelines;
+      expect(newPipelines).not.toBe(oldPipelines);
+    });
+
+    it("handles disconnect → connect lifecycle correctly", () => {
+      // Start with connected project
+      let state = makeStateWithBead("bead-1", { stage: "builder" });
+      expect(state.projects.get("/test/project")!.connected).toBe(true);
+
+      // Disconnect
+      state = boardReducer(state, {
+        type: "PROJECT_DISCONNECTED",
+        payload: {
+          projectPath: "/test/project",
+          pluginId: "plugin-1",
+          projectName: "project",
+          reason: "heartbeat timeout",
+        },
+      });
+      expect(state.projects.get("/test/project")!.connected).toBe(false);
+
+      // Reconnect
+      state = boardReducer(state, {
+        type: "PROJECT_CONNECTED",
+        payload: {
+          pluginId: "plugin-2",
+          projectPath: "/test/project",
+          projectName: "project",
+        },
+      });
+      const project = state.projects.get("/test/project")!;
+      expect(project.connected).toBe(true);
+      expect(project.pluginId).toBe("plugin-2");
+      // Beads should survive the cycle
+      expect(project.pipelines.get("pipe-1")!.beads.has("bead-1")).toBe(true);
+    });
+  });
+
+  // ----------------------------------------------------------
   // PROJECT_DISCONNECTED
   // ----------------------------------------------------------
   describe("PROJECT_DISCONNECTED", () => {

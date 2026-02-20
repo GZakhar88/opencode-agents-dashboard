@@ -123,6 +123,7 @@ export function useEventSource(
     const eventTypes: SSEEventType[] = [
       "connected",
       "state:full",
+      "project:connected",
       "project:disconnected",
       "bead:discovered",
       "bead:claimed",

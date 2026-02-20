@@ -159,6 +159,7 @@ export type SSEEventType =
   | PluginEventType
   | "connected"
   | "state:full"
+  | "project:connected"
   | "project:disconnected";
 
 // ============================================================
@@ -333,6 +334,13 @@ export interface SSEStateFullPayload {
       },
     ]
   >;
+}
+
+/** SSE project:connected event payload */
+export interface SSEProjectConnectedPayload {
+  pluginId: string;
+  projectPath: string;
+  projectName: string;
 }
 
 /** SSE project:disconnected event payload */

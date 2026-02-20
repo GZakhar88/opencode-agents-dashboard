@@ -210,6 +210,28 @@ async function handleEvent(
       ...processed.data,
       _serverTimestamp: Date.now(),
     });
+
+    // If beads:refreshed reconciled stale beads, broadcast individual
+    // bead:removed events so connected frontends remove them from the board.
+    if (
+      processed.event === "beads:refreshed" &&
+      Array.isArray(processed.data.removedBeadIds) &&
+      (processed.data.removedBeadIds as string[]).length > 0
+    ) {
+      const ts = Date.now();
+      for (const beadId of processed.data.removedBeadIds as string[]) {
+        broadcast("bead:removed", {
+          beadId,
+          projectPath: plugin.projectPath,
+          pipelineId: "default",
+          _reconciled: true,
+          _serverTimestamp: ts,
+        });
+      }
+      console.log(
+        `[server] Reconciled ${(processed.data.removedBeadIds as string[]).length} stale bead(s) for ${plugin.projectName}`
+      );
+    }
   } else {
     // Fallback: enrich and broadcast directly (unknown plugin in state)
     const enrichedData = {

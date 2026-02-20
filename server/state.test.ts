@@ -850,6 +850,120 @@ describe("StateManager - unknown events", () => {
     expect(result!.data.beadCount).toBe(5);
     expect(result!.data.changed).toBe(2);
     expect(result!.data.projectPath).toBe("/path/project-a");
+    // No beadIds provided — no reconciliation, removedBeadIds should be empty
+    expect(result!.data.removedBeadIds).toEqual([]);
+  });
+
+  it("reconciles stale beads on beads:refreshed with beadIds", () => {
+    // Discover 3 beads
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b1", title: "B1", status: "open", priority: 1, issue_type: "task" },
+    });
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b2", title: "B2", status: "open", priority: 1, issue_type: "task" },
+    });
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b3", title: "B3", status: "open", priority: 1, issue_type: "task" },
+    });
+
+    // beads:refreshed with only b1 — b2 and b3 should be removed
+    const result = sm.processEvent("p1", "beads:refreshed", {
+      beadCount: 1,
+      changed: 0,
+      beadIds: ["b1"],
+    });
+
+    expect(result).not.toBeNull();
+    const removedIds = result!.data.removedBeadIds as string[];
+    expect(removedIds).toHaveLength(2);
+    expect(removedIds).toContain("b2");
+    expect(removedIds).toContain("b3");
+
+    // Verify b1 still exists, b2/b3 are gone from state
+    const state = sm.toJSON();
+    const project = state.projects.find(
+      (p: any) => p.projectPath === "/path/project-a"
+    ) as any;
+    const pipeline = project.pipelines[0];
+    const beadIds = pipeline.beads.map((b: any) => b.id);
+    expect(beadIds).toContain("b1");
+    expect(beadIds).not.toContain("b2");
+    expect(beadIds).not.toContain("b3");
+  });
+
+  it("removes all beads when beadIds is empty array", () => {
+    // Discover a bead
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b1", title: "B1", status: "open", priority: 1, issue_type: "task" },
+    });
+
+    // beads:refreshed with empty beadIds — all beads should be removed
+    const result = sm.processEvent("p1", "beads:refreshed", {
+      beadCount: 0,
+      changed: 0,
+      beadIds: [],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.data.removedBeadIds).toEqual(["b1"]);
+
+    // Verify bead is gone from state
+    const state = sm.toJSON();
+    const project = state.projects.find(
+      (p: any) => p.projectPath === "/path/project-a"
+    ) as any;
+    expect(project.pipelines[0].beads).toHaveLength(0);
+  });
+
+  it("clears currentBeadId when reconciled bead was the current bead", () => {
+    // Discover and claim a bead (sets currentBeadId)
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b1", title: "B1", status: "in_progress", priority: 1, issue_type: "task" },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "b1",
+      bead: { id: "b1", title: "B1", status: "in_progress", priority: 1, issue_type: "task" },
+    });
+
+    // Reconcile with empty set — b1 should be removed and currentBeadId cleared
+    const result = sm.processEvent("p1", "beads:refreshed", {
+      beadCount: 0,
+      changed: 0,
+      beadIds: [],
+    });
+
+    expect(result!.data.removedBeadIds).toEqual(["b1"]);
+
+    const state = sm.toJSON();
+    const project = state.projects.find(
+      (p: any) => p.projectPath === "/path/project-a"
+    ) as any;
+    expect(project.pipelines[0].currentBeadId).toBeNull();
+  });
+
+  it("also cleans up lastBeadSnapshot on reconciliation", () => {
+    // Discover beads (which populates lastBeadSnapshot via handleBeadDiscovered)
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b1", title: "B1", status: "open", priority: 1, issue_type: "task" },
+    });
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "b2", title: "B2", status: "open", priority: 1, issue_type: "task" },
+    });
+
+    // Reconcile with only b1 — b2 should be removed from snapshot too
+    sm.processEvent("p1", "beads:refreshed", {
+      beadCount: 1,
+      changed: 0,
+      beadIds: ["b1"],
+    });
+
+    // Check via toJSON — the lastBeadSnapshot should only contain b1
+    const state = sm.toJSON();
+    const project = state.projects.find(
+      (p: any) => p.projectPath === "/path/project-a"
+    ) as any;
+    const snapshotIds = project.lastBeadSnapshot.map((b: any) => b.id);
+    expect(snapshotIds).toEqual(["b1"]);
   });
 });
 

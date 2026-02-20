@@ -294,11 +294,7 @@ export class StateManager {
         return this.handleAgentIdle(project, data);
 
       case "beads:refreshed":
-        // Summary event — pass through with enrichment
-        return {
-          event,
-          data: { ...data, projectPath },
-        };
+        return this.handleBeadsRefreshed(project, data);
 
       case "pipeline:started":
         return this.handlePipelineStarted(project, data);
@@ -565,6 +561,58 @@ export class StateManager {
         ...data,
         projectPath: project.projectPath,
         pipelineId: pipeline.id,
+      },
+    };
+  }
+
+  /**
+   * Handle beads:refreshed — reconcile stale beads.
+   *
+   * When the payload includes a `beadIds` array, this is treated as the
+   * authoritative set of bead IDs that currently exist in bd. Any beads
+   * in the server's persisted state that are NOT in this set are removed.
+   * This fixes stale beads that linger after issues are closed/deleted in bd.
+   *
+   * Returns `removedBeadIds` in the event data so the routes layer can
+   * broadcast individual `bead:removed` events to connected frontends.
+   */
+  private handleBeadsRefreshed(
+    project: ProjectState,
+    data: Record<string, unknown>
+  ): { event: string; data: Record<string, unknown> } {
+    const removedBeadIds: string[] = [];
+
+    // If beadIds is provided, reconcile: remove any beads not in the set.
+    if (Array.isArray(data.beadIds)) {
+      const currentIds = new Set(data.beadIds as string[]);
+
+      for (const [, pipeline] of project.pipelines) {
+        for (const [beadId] of pipeline.beads) {
+          if (!currentIds.has(beadId)) {
+            pipeline.beads.delete(beadId);
+            if (pipeline.currentBeadId === beadId) {
+              pipeline.currentBeadId = null;
+            }
+            removedBeadIds.push(beadId);
+          }
+        }
+      }
+
+      if (removedBeadIds.length > 0) {
+        const removedSet = new Set(removedBeadIds);
+        project.lastBeadSnapshot = project.lastBeadSnapshot.filter(
+          (b) => !removedSet.has(b.id)
+        );
+        this.schedulePersist();
+      }
+    }
+
+    return {
+      event: "beads:refreshed",
+      data: {
+        ...data,
+        projectPath: project.projectPath,
+        removedBeadIds,
       },
     };
   }

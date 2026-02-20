@@ -731,10 +731,12 @@ async function refreshAndDiff($: any): Promise<BeadDiff[]> {
       }
     }
 
-    // Also push a summary refresh event
+    // Also push a summary refresh event with the authoritative bead ID set
+    // so the server can reconcile stale persisted beads.
     await pushEvent("beads:refreshed", {
       beadCount: next.length,
       changed: diffs.length,
+      beadIds: next.map((b) => b.id),
     });
 
     return diffs;
@@ -936,13 +938,18 @@ async function startupSequence(
         });
       }
     }
-    await pushEvent("beads:refreshed", {
-      beadCount: initialBeads.length,
-      changed: initialBeads.length,
-    });
   } else {
     log(`No beads found (bd not initialized or no issues)`);
   }
+
+  // Always send beads:refreshed — even with 0 beads — so the server can
+  // reconcile stale persisted beads that no longer exist in bd.
+  // The beadIds array is the authoritative set of current bead IDs.
+  await pushEvent("beads:refreshed", {
+    beadCount: initialBeads.length,
+    changed: initialBeads.length,
+    beadIds: initialBeads.map((b) => b.id),
+  });
 
   // Step 6: Register process exit cleanup (once per process lifetime)
   if (!cleanupRegistered) {

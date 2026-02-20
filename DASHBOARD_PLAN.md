@@ -265,7 +265,7 @@ Body: { "pluginId": "uuid" }
 DELETE /api/plugin/:pluginId
 ```
 
-The server marks a plugin as disconnected if no heartbeat is received within 90 seconds. Disconnected projects show a "DISCONNECTED" badge in the dashboard but retain their last-known state.
+The server marks a plugin as disconnected if no heartbeat is received within 45 seconds. Disconnected projects show a "DISCONNECTED" badge in the dashboard but retain their last-known state.
 
 ### Auto-Start Logic
 

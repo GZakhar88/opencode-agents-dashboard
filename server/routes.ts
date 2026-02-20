@@ -442,11 +442,11 @@ export { plugins, broadcast, closeAllClients as closeAllSSEClients, resetSSE };
 
 /**
  * Periodically check plugin heartbeats.
- * Plugins that haven't sent a heartbeat within 90 seconds are marked
+ * Plugins that haven't sent a heartbeat within 45 seconds are marked
  * as disconnected (state retained, but connection badge shows DISCONNECTED).
  */
 const PLUGIN_HEALTH_CHECK_INTERVAL_MS = 30_000;
-const PLUGIN_HEARTBEAT_TIMEOUT_MS = 90_000;
+const PLUGIN_HEARTBEAT_TIMEOUT_MS = 45_000;
 
 const pluginHealthInterval = setInterval(() => {
   const now = Date.now();

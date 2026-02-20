@@ -15,7 +15,14 @@
  *   GET    /api/health            - Server health check
  */
 
-// --- Placeholder State ---
+import { StateManager } from "./state";
+
+// --- State Management ---
+
+/** Central state manager — processes events and persists to disk */
+export const stateManager = new StateManager();
+
+// --- Plugin Registry ---
 
 interface PluginRecord {
   pluginId: string;
@@ -144,6 +151,9 @@ async function handleRegister(
     lastHeartbeat: now,
   });
 
+  // Register in state manager (creates or re-activates project)
+  stateManager.registerPlugin(pluginId, projectPath, projectName);
+
   console.log(
     `[server] Plugin registered: ${pluginId} (${projectName} @ ${projectPath})`
   );
@@ -201,18 +211,30 @@ async function handleEvent(
   // Update heartbeat on any event
   plugin.lastHeartbeat = Date.now();
 
-  // Enrich event data with server-side metadata
-  // Wrap non-plain-object data (primitives, arrays, null) in { data: ... }
+  // Process event through state manager (updates canonical state)
   const isPlainObject =
     data != null && typeof data === "object" && !Array.isArray(data);
-  const enrichedData = {
-    ...(isPlainObject ? (data as Record<string, unknown>) : { data }),
-    projectPath: plugin.projectPath,
-    _serverTimestamp: Date.now(),
-  };
+  const eventData = isPlainObject
+    ? (data as Record<string, unknown>)
+    : { data };
 
-  // Broadcast to all SSE clients
-  broadcast(event, enrichedData);
+  const processed = stateManager.processEvent(pluginId, event, eventData);
+
+  // Broadcast to all SSE clients — use state-enriched data if available
+  if (processed) {
+    broadcast(processed.event, {
+      ...processed.data,
+      _serverTimestamp: Date.now(),
+    });
+  } else {
+    // Fallback: enrich and broadcast directly (unknown plugin in state)
+    const enrichedData = {
+      ...eventData,
+      projectPath: plugin.projectPath,
+      _serverTimestamp: Date.now(),
+    };
+    broadcast(event, enrichedData);
+  }
 
   console.log(`[server] Event from ${pluginId}: ${event}`);
 
@@ -250,6 +272,7 @@ async function handleHeartbeat(
   }
 
   plugin.lastHeartbeat = Date.now();
+  stateManager.updateHeartbeat(pluginId);
 
   return json({ ok: true }, 200, origin);
 }
@@ -270,6 +293,9 @@ function handleDeregister(
 
   plugins.delete(pluginId);
 
+  // Mark project as disconnected in state (retains last-known state)
+  stateManager.deregisterPlugin(pluginId);
+
   console.log(
     `[server] Plugin deregistered: ${pluginId} (${plugin.projectName})`
   );
@@ -287,11 +313,9 @@ function handleDeregister(
  * GET /api/state
  *
  * Returns full board state as JSON (all projects, all pipelines, all beads).
- * Placeholder: returns empty projects array.
  */
 function handleState(origin?: string | null): Response {
-  // Placeholder — actual state management comes in bead df6
-  return json({ projects: [] }, 200, origin);
+  return json(stateManager.toJSON(), 200, origin);
 }
 
 /**
@@ -311,7 +335,7 @@ function handleEvents(origin?: string | null): Response {
       // Set reconnect interval
       controller.enqueue(encoder.encode("retry: 3000\n\n"));
 
-      // Send connection confirmation
+      // Send connection confirmation with current state
       sseMessageId++;
       const connectMsg = encoder.encode(
         `id: ${sseMessageId}\nevent: connected\ndata: ${JSON.stringify({
@@ -325,6 +349,13 @@ function handleEvents(origin?: string | null): Response {
         })}\n\n`
       );
       controller.enqueue(connectMsg);
+
+      // Send full state snapshot for reconnection support
+      sseMessageId++;
+      const stateMsg = encoder.encode(
+        `id: ${sseMessageId}\nevent: state:full\ndata: ${JSON.stringify(stateManager.toJSON())}\n\n`
+      );
+      controller.enqueue(stateMsg);
     },
     cancel() {
       if (clientController) {

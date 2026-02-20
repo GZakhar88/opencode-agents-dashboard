@@ -11,6 +11,7 @@ import {
   plugins,
   sseClients,
   broadcast,
+  stateManager,
 } from "./routes";
 
 // --- Test Helpers ---
@@ -41,6 +42,7 @@ async function jsonBody(res: Response): Promise<unknown> {
 function cleanup() {
   plugins.clear();
   sseClients.clear();
+  stateManager.clear();
 }
 
 // --- Tests ---
@@ -412,13 +414,33 @@ describe("DELETE /api/plugin/:id", () => {
 describe("GET /api/state", () => {
   beforeEach(cleanup);
 
-  it("returns projects array (placeholder)", async () => {
+  it("returns empty projects when none registered", async () => {
     const req = makeRequest("GET", "/api/state");
     const res = await handleRequest(req);
 
     expect(res.status).toBe(200);
     const data = (await jsonBody(res)) as { projects: unknown[] };
     expect(data.projects).toEqual([]);
+  });
+
+  it("returns registered projects with state", async () => {
+    // Register a plugin first
+    await handleRequest(
+      makeRequest("POST", "/api/plugin/register", {
+        projectPath: "/Users/test/project",
+        projectName: "my-project",
+      })
+    );
+
+    const req = makeRequest("GET", "/api/state");
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    const data = (await jsonBody(res)) as { projects: any[] };
+    expect(data.projects.length).toBe(1);
+    expect(data.projects[0].projectPath).toBe("/Users/test/project");
+    expect(data.projects[0].projectName).toBe("my-project");
+    expect(data.projects[0].connected).toBe(true);
   });
 
   it("includes CORS headers", async () => {

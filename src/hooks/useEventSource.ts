@@ -6,6 +6,8 @@
  * - Initial connection with state:full snapshot delivery
  * - Auto-reconnect with exponential backoff (3s → 6s → 12s → max 30s)
  * - Connection status tracking (connecting / connected / reconnecting / disconnected)
+ * - Graceful degradation: gives up after MAX_RETRIES and transitions to "disconnected"
+ * - Manual reconnect via returned `reconnect()` function (resets retry counter)
  * - Graceful cleanup on unmount
  */
 
@@ -45,6 +47,8 @@ export interface UseEventSourceReturn {
 const INITIAL_RETRY_MS = 3000;
 const MAX_RETRY_MS = 30000;
 const BACKOFF_MULTIPLIER = 2;
+/** After this many consecutive failures, give up and show "disconnected" */
+const MAX_RETRIES = 10;
 
 /**
  * React hook that manages an SSE connection to the dashboard server.
@@ -58,7 +62,7 @@ const BACKOFF_MULTIPLIER = 2;
  * ```
  */
 export function useEventSource(
-  options: UseEventSourceOptions
+  options: UseEventSourceOptions,
 ): UseEventSourceReturn {
   const {
     url = "/api/events",
@@ -168,14 +172,22 @@ export function useEventSource(
       es.close();
       eventSourceRef.current = null;
 
+      retryCountRef.current++;
+
+      // After MAX_RETRIES consecutive failures, give up and show disconnected.
+      // User can manually reconnect via the UI, which resets the counter.
+      if (retryCountRef.current > MAX_RETRIES) {
+        updateStatus("disconnected");
+        return;
+      }
+
       updateStatus("reconnecting");
 
       // Exponential backoff
       const delay = Math.min(
-        INITIAL_RETRY_MS * Math.pow(BACKOFF_MULTIPLIER, retryCountRef.current),
-        MAX_RETRY_MS
+        INITIAL_RETRY_MS * BACKOFF_MULTIPLIER ** (retryCountRef.current - 1),
+        MAX_RETRY_MS,
       );
-      retryCountRef.current++;
 
       retryTimerRef.current = setTimeout(() => {
         if (!isUnmountedRef.current) {

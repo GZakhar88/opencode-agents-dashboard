@@ -1,9 +1,15 @@
 # Dependencies
 node_modules/
 
+# Build output
+dist/
+
 # State persistence (generated at runtime)
 server/.dashboard-state.json
 server/.test-state.json
+
+# Bun
+bun.lockb
 
 # OS
 .DS_Store

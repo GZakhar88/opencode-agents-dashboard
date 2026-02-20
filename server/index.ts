@@ -20,6 +20,7 @@ const PORT = Number(process.env.DASHBOARD_PORT) || 3333;
 const server = Bun.serve({
   port: PORT,
   fetch: handleRequest,
+  idleTimeout: 255, // seconds (max) — SSE connections are long-lived
 });
 
 console.log(`[dashboard-server] Running on http://localhost:${server.port}`);

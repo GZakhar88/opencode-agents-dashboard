@@ -875,6 +875,163 @@ The dashboard is designed for desktop and laptop screens. On smaller screens (ta
 
 **Estimated effort:** ~3 hours
 
+### Phase 5.5: Critical Bugfix — Plugin Stability
+
+> **BLOCKER:** The plugin in its current form has two critical bugs that must be fixed before any further dashboard frontend work. When installed, the plugin **breaks OpenCode entirely** (session spam at ~3/sec) and **crashes the machine** due to runaway resource consumption. The plugin is currently NOT installed in `~/.config/opencode/plugins/` to avoid triggering these bugs.
+
+#### Bug 1: Plugin Activates Unconditionally at Load Time
+
+**Problem:** The plugin factory function calls `await startupSequence(...)` immediately when OpenCode loads the plugin. Since plugins in `~/.config/opencode/plugins/` are loaded automatically at startup, this means: server spawns, registration happens, heartbeat starts, and all beads are fetched — every time OpenCode starts, regardless of whether the user intends to use the orchestrator pipeline.
+
+**Root cause:** `dashboard-bridge.ts` line 825 — `startupSequence()` runs inside the plugin factory with no gating condition.
+
+**Fix — Lazy activation with dual trigger:**
+
+The plugin loads in a "dormant" state. Activation happens only when:
+1. **Auto-detect:** The `chat.message` hook sees `input.agent === "orchestrator"` for the first time, OR
+2. **Manual:** The user runs a `/dashboard` command (intercepted via `command.execute.before`).
+
+Implementation:
+- Add module-level `let activated = false` and `let activating = false` flags
+- Remove `await startupSequence(...)` from the factory function body
+- In `chat.message`: check `input.agent === "orchestrator"` — if true and `!activated`, run `startupSequence()` once
+- Add `command.execute.before` hook: intercept `/dashboard` command to manually trigger activation
+- All other hooks (`tool.execute.before`, `tool.execute.after`, `event`) early-return with `if (!activated) return;`
+- Context injection in `chat.message` only proceeds for orchestrator sessions
+
+#### Bug 2: Session Spam / Feedback Loop (~3 sessions/sec)
+
+**Problem:** When the plugin is active, OpenCode starts creating sessions at ~3/sec, completely blocking the application and crashing the computer.
+
+**Root cause analysis — multiple contributing factors:**
+
+**Factor A: Race condition in `injectContext` (primary suspect)**
+
+The `injectedSessions.add(sessionID)` guard is set AFTER `await client.session.prompt()` (line 209), not before. If `client.session.prompt()` with `noReply: true` triggers the `chat.message` hook while the await is pending, the guard hasn't been set yet and the hook re-enters:
+
+```
+chat.message(session X)
+  → injectedSessions.has(X)? NO
+  → await client.session.prompt(X, { noReply: true })
+     ↑ fires chat.message(X) while awaiting (before line 209)
+       → injectedSessions.has(X)? STILL NO — not added yet!
+       → await client.session.prompt(X, ...) — another message
+          ↑ fires chat.message(X) again...
+             → INFINITE CASCADE
+```
+
+Each iteration adds a synthetic message, which triggers another event, flooding the system.
+
+**Factor B: No re-entrancy protection on `refreshAndDiff`**
+
+`refreshAndDiff($)` is called from both `tool.execute.after` (every tool execution) and `session.idle` (every idle event). If concurrent calls stack up (which they will during rapid event processing), multiple `bd list --json` executions and HTTP POST batches run simultaneously, amplifying the resource consumption.
+
+**Factor C: No debouncing on event-triggered refreshes**
+
+Every single `tool.execute.after` fires `refreshAndDiff($)`, which runs `bd list --json` + computes diffs + POSTs events. During normal operation, tools fire rapidly (multiple per second). Without debouncing, this creates a flood of shell commands and HTTP requests.
+
+**Factor D: `chat.message` fires for ALL sessions**
+
+The hook runs for every session (builder, reviewer, committer, designer, etc.), not just the orchestrator. Each non-orchestrator session triggers `isChildSession()` and `hasExistingContext()` API calls before being skipped — unnecessary overhead that adds to the event cascade.
+
+**Fix — Defense in depth (6 layers):**
+
+| Layer | Change | What it prevents |
+|-------|--------|-----------------|
+| 1. Lazy activation | All hooks dormant until orchestrator detected | Server spawn, heartbeats, bead fetch don't run until needed |
+| 2. Race condition fix | Move `injectedSessions.add()` BEFORE `await client.session.prompt()`, rollback on failure | `chat.message` → `session.prompt()` → `chat.message` re-entrancy |
+| 3. Re-entrancy guard | `let isRefreshing = false` flag in `refreshAndDiff`, skip if already running | `refreshAndDiff` calling itself via cascading events |
+| 4. Debouncing | Replace direct `refreshAndDiff` calls in hooks with `scheduleRefresh($, 500)` using trailing debounce | Rapid-fire events batched into single `bd list --json` call |
+| 5. Orchestrator-only filter | `chat.message` checks `input.agent` — non-orchestrator sessions marked in `injectedSessions` immediately and skipped | Unnecessary API calls and injection attempts for sub-agent sessions |
+| 6. `!activated` early-return | Every hook except `chat.message` (which handles activation) returns early if `!activated` | All tracking disabled when plugin is dormant |
+
+**Specific code changes in `dashboard-bridge.ts`:**
+
+**New module-level state:**
+```typescript
+let activated = false;
+let activating = false;
+let isRefreshing = false;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+```
+
+**`injectContext` — fix race condition:**
+```typescript
+async function injectContext(client, sessionID, model, agent, $) {
+  if (injectedSessions.has(sessionID)) return;
+  injectedSessions.add(sessionID);          // Mark FIRST — closes race window
+  try {
+    const bdPrime = await getBdPrimeOutput($);
+    const contextMessage = buildContextMessage(bdPrime);
+    await client.session.prompt({ ... });
+  } catch (err) {
+    injectedSessions.delete(sessionID);     // Rollback on failure
+    console.error(...);
+  }
+}
+```
+
+**`refreshAndDiff` — add re-entrancy guard:**
+```typescript
+async function refreshAndDiff($) {
+  if (isRefreshing) return [];
+  isRefreshing = true;
+  try { /* existing logic */ }
+  finally { isRefreshing = false; }
+}
+```
+
+**New `scheduleRefresh` — debounced wrapper:**
+```typescript
+function scheduleRefresh($, delayMs = 500) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    await refreshAndDiff($);
+  }, delayMs);
+}
+```
+
+**`chat.message` — orchestrator-only + lazy activation:**
+```typescript
+"chat.message": async (input, output) => {
+  if (!activated && !activating && input.agent === "orchestrator") {
+    activating = true;
+    await startupSequence(directory, projectName, $);
+    activated = true; activating = false;
+  }
+  if (input.agent && input.agent !== "orchestrator") {
+    injectedSessions.add(input.sessionID);
+    return;
+  }
+  // ... existing injection logic (with race-fix applied)
+}
+```
+
+**All other hooks — activation guard:**
+```typescript
+"tool.execute.before": async (...) => { if (!activated) return; ... },
+"tool.execute.after":  async (...) => { if (!activated) return; scheduleRefresh($); ... },
+event: async (...) => { if (!activated) return; ... },
+```
+
+**`command.execute.before` — manual activation:**
+```typescript
+"command.execute.before": async (input, output) => {
+  if (input.command === "dashboard") {
+    if (!activated && !activating) {
+      activating = true;
+      await startupSequence(directory, projectName, $);
+      activated = true; activating = false;
+    }
+  }
+}
+```
+
+**Estimated effort:** ~2 hours
+
+---
+
 ### Phase 6: Polish & Reliability
 
 > **Note:** All features across Phases 4-6 are in scope for the first usable version. Nothing is deferred to a "post-MVP" iteration. The features listed below (animations, multi-project, multi-pipeline, timers, priority colors, error column, auto-collapse) are all required for the initial release.
@@ -893,10 +1050,10 @@ The dashboard is designed for desktop and laptop screens. On smaller screens (ta
   - Server not reachable -> plugin degrades gracefully (context injection still works, tracking disabled)
   - Multiple OpenCode instances for the same project path -> server merges into single project entry
 - Dark theme by default (matches terminal workflow aesthetic)
-- Debounced `bd list --json` calls (if multiple events fire in rapid succession, batch into one query)
-- Debounced event POSTs to server (batch rapid-fire events into fewer HTTP calls)
+- ~~Debounced `bd list --json` calls (if multiple events fire in rapid succession, batch into one query)~~ *Moved to Phase 5.5 as part of the bugfix*
+- ~~Debounced event POSTs to server (batch rapid-fire events into fewer HTTP calls)~~ *Moved to Phase 5.5 as part of the bugfix*
 
-**Estimated effort:** ~2.5 hours
+**Estimated effort:** ~2 hours (reduced — debouncing moved to Phase 5.5)
 
 ---
 
@@ -920,16 +1077,17 @@ The dashboard is designed for desktop and laptop screens. On smaller screens (ta
 
 ## Effort Estimates
 
-| Phase | Description | Estimated Effort |
-|-------|-------------|-----------------|
-| 0 | Spike: plugin-to-server communication (proof of concept) | ~1 hour |
-| 1 | Plugin: context injection & bead awareness | ~1 hour |
-| 2 | Plugin: bead state tracking & event bridge | ~2.5 hours |
-| 3 | Dashboard server: HTTP, SSE & state aggregation | ~2 hours |
-| 4 | Dashboard: scaffold monorepo project | ~1 hour |
-| 5 | Dashboard: connect, render, animate | ~3 hours |
-| 6 | Polish & reliability | ~2.5 hours |
-| **Total** | | **~13 hours** |
+| Phase | Description | Estimated Effort | Status |
+|-------|-------------|-----------------|--------|
+| 0 | Spike: plugin-to-server communication (proof of concept) | ~1 hour | Done |
+| 1 | Plugin: context injection & bead awareness | ~1 hour | Done |
+| 2 | Plugin: bead state tracking & event bridge | ~2.5 hours | Done |
+| 3 | Dashboard server: HTTP, SSE & state aggregation | ~2 hours | Done |
+| 4 | Dashboard: scaffold monorepo project | ~1 hour | Done |
+| 5 | Dashboard: connect, render, animate | ~3 hours | In progress |
+| **5.5** | **Critical bugfix: plugin stability (lazy activation, feedback loop prevention)** | **~2 hours** | **Blocked (must do before Phase 5 continues)** |
+| 6 | Polish & reliability | ~2 hours | Pending |
+| **Total** | | **~14.5 hours** |
 
 ---
 
@@ -978,6 +1136,8 @@ The dashboard is designed for desktop and laptop screens. On smaller screens (ta
 12. **Monorepo structure**: Server and React app live in the same repository (`opencode-dashboard/`), sharing types via a `shared/` directory. Simplifies development and deployment.
 13. **shadcn/ui for components**: Copy-paste component library built on Radix UI + Tailwind. Provides accessible, well-styled primitives (Card, Badge, Collapsible, Tooltip, ScrollArea, Skeleton) without adding a heavy dependency. Framer Motion handles layout animations separately.
 14. **Desktop-first responsive**: The 8-column Kanban board is inherently wide. Rather than building a fundamentally different mobile layout, the initial release uses horizontal scroll on smaller screens. A dedicated phone layout is deferred to post-MVP.
+15. **Lazy plugin activation (Phase 5.5 bugfix)**: The plugin must NOT run `startupSequence()` at load time. OpenCode auto-loads all plugins on startup — an eagerly-activating plugin that spawns servers, starts heartbeats, and hooks into every event creates a catastrophic feedback loop. The plugin loads dormant and activates only on orchestrator activity or explicit `/dashboard` command.
+16. **Defense-in-depth against feedback loops (Phase 5.5 bugfix)**: Six independent safeguards prevent event cascades: lazy activation, race-condition-free session guarding (`injectedSessions.add()` before `await`), re-entrancy guard on `refreshAndDiff`, debounced refresh scheduling, orchestrator-only `chat.message` filtering, and `!activated` early-returns in all hooks. Any single layer should be sufficient; all six together make the system robust against unknown OpenCode event model behaviors.
 
 ---
 

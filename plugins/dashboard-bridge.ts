@@ -473,17 +473,29 @@ function stopHeartbeat(): void {
 
 /**
  * Deregister this plugin from the dashboard server.
- * Called on plugin shutdown (best-effort, fire-and-forget).
+ * Called on plugin shutdown.
+ *
+ * Uses `keepalive: true` so the request survives process shutdown — the
+ * browser/runtime will finish sending the request even after the page
+ * (or Node/Bun process) begins teardown.  This is the primary reliability
+ * mechanism; the process-exit hooks in `startupSequence` are a secondary
+ * safety net.
  */
 async function deregisterFromServer(): Promise<void> {
   if (!pluginId || !serverReady) return;
 
+  // Capture and clear pluginId to prevent duplicate deregistration
+  // (e.g., if both a signal handler and beforeExit fire).
+  const id = pluginId;
+  pluginId = null;
+
   try {
-    await fetch(`${DEREGISTER_ENDPOINT}/${pluginId}`, {
+    await fetch(`${DEREGISTER_ENDPOINT}/${id}`, {
       method: "DELETE",
+      keepalive: true,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    log(`Deregistered from server (pluginId: ${pluginId})`);
+    log(`Deregistered from server (pluginId: ${id})`);
   } catch (err) {
     warn(`Deregistration failed (server will detect via heartbeat timeout):`, err);
   }
@@ -952,16 +964,39 @@ async function startupSequence(
   });
 
   // Step 6: Register process exit cleanup (once per process lifetime)
+  //
+  // `keepalive: true` on the fetch in `deregisterFromServer()` is the
+  // primary mechanism — it tells the runtime to finish sending the
+  // request even during teardown. The hooks below are a secondary
+  // safety net:
+  //
+  // - `beforeExit`: fires when the event loop drains; we can still
+  //   await the deregistration here because the loop restarts.
+  // - `SIGINT` / `SIGTERM`: the host process handles exit; we just
+  //   initiate the keepalive fetch as early as possible.
   if (!cleanupRegistered) {
     cleanupRegistered = true;
-    const cleanup = () => {
+
+    // beforeExit: the event loop is empty but the process hasn't exited
+    // yet. We can extend the loop by awaiting the deregistration.
+    process.on("beforeExit", async () => {
       stopHeartbeat();
-      // Fire-and-forget deregistration — can't reliably await in exit handlers
+      await deregisterFromServer();
+    });
+
+    // SIGINT / SIGTERM: The host process (OpenCode) handles the actual
+    // exit. We just initiate deregistration here — keepalive: true on
+    // the fetch ensures the DELETE request is flushed by the runtime
+    // even if the process begins tearing down immediately after.
+    // NOTE: We do NOT call process.exit() here because this is a plugin
+    // inside the host process; the host manages its own shutdown.
+    const signalCleanup = () => {
+      stopHeartbeat();
+      // Fire-and-forget — keepalive: true ensures delivery
       deregisterFromServer().catch(() => {});
     };
-    process.on("beforeExit", cleanup);
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
+    process.on("SIGINT", signalCleanup);
+    process.on("SIGTERM", signalCleanup);
   }
 }
 

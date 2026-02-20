@@ -16,6 +16,13 @@
  */
 
 import { StateManager } from "./state";
+import {
+  broadcast,
+  createSSEResponse,
+  closeAllClients,
+  clientCount,
+  reset as resetSSE,
+} from "./sse";
 
 // --- State Management ---
 
@@ -35,16 +42,8 @@ interface PluginRecord {
 /** Registered plugins, keyed by pluginId */
 const plugins = new Map<string, PluginRecord>();
 
-/** Connected SSE clients */
-const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
-
 /** Server start time for uptime calculation */
 const startTime = Date.now();
-
-/** SSE message ID counter for reconnection support */
-let sseMessageId = 0;
-
-const encoder = new TextEncoder();
 
 // --- Helpers ---
 
@@ -87,21 +86,6 @@ async function parseBody(req: Request): Promise<unknown | null> {
 /** Generate a UUID v4 */
 function generateId(): string {
   return crypto.randomUUID();
-}
-
-/** Broadcast an SSE event to all connected clients */
-function broadcast(event: string, data: unknown): void {
-  sseMessageId++;
-  const msg = `id: ${sseMessageId}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  const encoded = encoder.encode(msg);
-
-  for (const client of sseClients) {
-    try {
-      client.enqueue(encoded);
-    } catch {
-      sseClients.delete(client);
-    }
-  }
 }
 
 // --- Route Handlers ---
@@ -322,56 +306,20 @@ function handleState(origin?: string | null): Response {
  * GET /api/events
  *
  * SSE stream for real-time updates.
- * Sends a "connected" event immediately, then streams events.
+ * Sends "connected" + "state:full" events immediately, then streams updates.
  */
 function handleEvents(origin?: string | null): Response {
-  let clientController: ReadableStreamDefaultController<Uint8Array>;
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      clientController = controller;
-      sseClients.add(controller);
-
-      // Set reconnect interval
-      controller.enqueue(encoder.encode("retry: 3000\n\n"));
-
-      // Send connection confirmation with current state
-      sseMessageId++;
-      const connectMsg = encoder.encode(
-        `id: ${sseMessageId}\nevent: connected\ndata: ${JSON.stringify({
-          message: "SSE connected",
-          timestamp: Date.now(),
-          plugins: Array.from(plugins.values()).map((p) => ({
-            pluginId: p.pluginId,
-            projectPath: p.projectPath,
-            projectName: p.projectName,
-          })),
-        })}\n\n`
-      );
-      controller.enqueue(connectMsg);
-
-      // Send full state snapshot for reconnection support
-      sseMessageId++;
-      const stateMsg = encoder.encode(
-        `id: ${sseMessageId}\nevent: state:full\ndata: ${JSON.stringify(stateManager.toJSON())}\n\n`
-      );
-      controller.enqueue(stateMsg);
-    },
-    cancel() {
-      if (clientController) {
-        sseClients.delete(clientController);
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      ...corsHeaders(origin),
-    },
-  });
+  return createSSEResponse(
+    () =>
+      Array.from(plugins.values()).map((p) => ({
+        pluginId: p.pluginId,
+        projectPath: p.projectPath,
+        projectName: p.projectName,
+      })),
+    () => stateManager.toJSON(),
+    origin,
+    corsHeaders
+  );
 }
 
 /**
@@ -385,7 +333,7 @@ function handleHealth(origin?: string | null): Response {
       status: "ok",
       uptime: Math.floor((Date.now() - startTime) / 1000),
       plugins: plugins.size,
-      sseClients: sseClients.size,
+      sseClients: clientCount(),
     },
     200,
     origin
@@ -466,43 +414,41 @@ export async function handleRequest(req: Request): Promise<Response> {
 
 // --- Exports for testing / external access ---
 
-export { plugins, sseClients, broadcast };
+export { plugins, broadcast, closeAllClients as closeAllSSEClients, resetSSE };
 
-// --- SSE Heartbeat ---
-
-/**
- * Periodic SSE heartbeat to detect and clean up stale clients.
- * SSE comment lines (starting with ':') are ignored by EventSource.
- */
-const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
-
-const sseHeartbeatInterval = setInterval(() => {
-  const heartbeat = encoder.encode(`: heartbeat ${Date.now()}\n\n`);
-  for (const client of sseClients) {
-    try {
-      client.enqueue(heartbeat);
-    } catch {
-      sseClients.delete(client);
-    }
-  }
-}, SSE_HEARTBEAT_INTERVAL_MS);
-
-// Don't prevent the process from exiting when this is the only pending timer
-// (important for test runners that import this module)
-sseHeartbeatInterval.unref();
+// --- Plugin Health Monitoring ---
 
 /**
- * Gracefully close all SSE connections and clean up resources.
- * Called during server shutdown.
+ * Periodically check plugin heartbeats.
+ * Plugins that haven't sent a heartbeat within 90 seconds are marked
+ * as disconnected (state retained, but connection badge shows DISCONNECTED).
  */
-export function closeAllSSEClients(): void {
-  clearInterval(sseHeartbeatInterval);
-  for (const client of sseClients) {
-    try {
-      client.close();
-    } catch {
-      // already closed
+const PLUGIN_HEALTH_CHECK_INTERVAL_MS = 30_000;
+const PLUGIN_HEARTBEAT_TIMEOUT_MS = 90_000;
+
+const pluginHealthInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [pluginId, plugin] of plugins) {
+    if (now - plugin.lastHeartbeat > PLUGIN_HEARTBEAT_TIMEOUT_MS) {
+      console.log(
+        `[server] Plugin ${pluginId} (${plugin.projectName}) heartbeat timeout — marking disconnected`
+      );
+      plugins.delete(pluginId);
+      stateManager.deregisterPlugin(pluginId);
+      broadcast("project:disconnected", {
+        projectPath: plugin.projectPath,
+        pluginId,
+        reason: "heartbeat_timeout",
+      });
     }
   }
-  sseClients.clear();
+}, PLUGIN_HEALTH_CHECK_INTERVAL_MS);
+
+pluginHealthInterval.unref();
+
+/**
+ * Stop plugin health monitoring (for graceful shutdown).
+ */
+export function stopHealthMonitoring(): void {
+  clearInterval(pluginHealthInterval);
 }

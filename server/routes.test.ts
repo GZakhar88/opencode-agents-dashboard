@@ -9,10 +9,11 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import {
   handleRequest,
   plugins,
-  sseClients,
   broadcast,
   stateManager,
+  resetSSE,
 } from "./routes";
+import { clients as sseClients } from "./sse";
 
 // --- Test Helpers ---
 
@@ -41,7 +42,7 @@ async function jsonBody(res: Response): Promise<unknown> {
 
 function cleanup() {
   plugins.clear();
-  sseClients.clear();
+  resetSSE();
   stateManager.clear();
 }
 
@@ -260,13 +261,13 @@ describe("POST /api/plugin/event", () => {
     let capturedData: string | null = null;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        sseClients.add(controller);
         // Override enqueue to capture
         const originalEnqueue = controller.enqueue.bind(controller);
         controller.enqueue = (chunk: Uint8Array) => {
           capturedData = new TextDecoder().decode(chunk);
           originalEnqueue(chunk);
         };
+        sseClients.add({ controller, connectedAt: Date.now() });
       },
     });
     // Start reading to keep stream alive
@@ -387,7 +388,6 @@ describe("DELETE /api/plugin/:id", () => {
     let capturedData: string | null = null;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        sseClients.add(controller);
         const originalEnqueue = controller.enqueue.bind(controller);
         controller.enqueue = (chunk: Uint8Array) => {
           const text = new TextDecoder().decode(chunk);
@@ -396,6 +396,7 @@ describe("DELETE /api/plugin/:id", () => {
           }
           originalEnqueue(chunk);
         };
+        sseClients.add({ controller, connectedAt: Date.now() });
       },
     });
     const reader = stream.getReader();
@@ -648,12 +649,12 @@ describe("broadcast", () => {
     const received: string[] = [];
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        sseClients.add(controller);
         const originalEnqueue = controller.enqueue.bind(controller);
         controller.enqueue = (chunk: Uint8Array) => {
           received.push(new TextDecoder().decode(chunk));
           originalEnqueue(chunk);
         };
+        sseClients.add({ controller, connectedAt: Date.now() });
       },
     });
     const reader = stream.getReader();
@@ -676,7 +677,7 @@ describe("broadcast", () => {
       },
     } as unknown as ReadableStreamDefaultController<Uint8Array>;
 
-    sseClients.add(brokenController);
+    sseClients.add({ controller: brokenController, connectedAt: Date.now() });
     expect(sseClients.size).toBe(1);
 
     broadcast("test:event", {});

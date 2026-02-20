@@ -8,7 +8,12 @@
  * Port: 3333 (configurable via DASHBOARD_PORT env var)
  */
 
-import { handleRequest, closeAllSSEClients, stateManager } from "./routes";
+import {
+  handleRequest,
+  closeAllSSEClients,
+  stateManager,
+  stopHealthMonitoring,
+} from "./routes";
 
 const PORT = Number(process.env.DASHBOARD_PORT) || 3333;
 
@@ -33,6 +38,7 @@ console.log(`  GET    /api/health`);
 function shutdown() {
   console.log(`\n[dashboard-server] Shutting down...`);
   stateManager.persistNow(); // Flush state to disk before shutdown
+  stopHealthMonitoring();
   closeAllSSEClients();
   server.stop();
   console.log(`[dashboard-server] Server stopped.`);

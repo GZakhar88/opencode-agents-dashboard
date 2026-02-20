@@ -218,6 +218,12 @@ export class StateManager {
     for (const [, project] of this.state.projects) {
       if (project.pluginId === pluginId) {
         project.connected = false;
+        // No active session — mark active pipelines as idle
+        for (const [, pipeline] of project.pipelines) {
+          if (pipeline.status === "active") {
+            pipeline.status = "idle";
+          }
+        }
         this.schedulePersist();
         return project;
       }
@@ -854,6 +860,12 @@ export class StateManager {
       // Mark all projects as disconnected on load (plugins will re-register)
       for (const [, project] of this.state.projects) {
         project.connected = false;
+        // No session running after restart — mark active pipelines as idle
+        for (const [, pipeline] of project.pipelines) {
+          if (pipeline.status === "active") {
+            pipeline.status = "idle";
+          }
+        }
       }
       console.log(
         `[state] Loaded state from disk: ${this.state.projects.size} project(s)`

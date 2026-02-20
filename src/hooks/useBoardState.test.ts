@@ -1096,6 +1096,48 @@ describe("boardReducer", () => {
       expect(project.pipelines.get("pipe-1")!.beads.has("bead-1")).toBe(true);
     });
 
+    it("marks active pipelines as idle on disconnect", () => {
+      const state = makeStateWithBead("bead-1");
+      // Verify pipeline starts as active
+      expect(
+        state.projects.get("/test/project")!.pipelines.get("pipe-1")!.status
+      ).toBe("active");
+
+      const result = boardReducer(state, {
+        type: "PROJECT_DISCONNECTED",
+        payload: {
+          projectPath: "/test/project",
+          pluginId: "plugin-1",
+          projectName: "project",
+          reason: "heartbeat timeout",
+        },
+      });
+
+      const pipeline = result.projects.get("/test/project")!.pipelines.get("pipe-1")!;
+      expect(pipeline.status).toBe("idle");
+      // Beads should still be preserved
+      expect(pipeline.beads.has("bead-1")).toBe(true);
+    });
+
+    it("preserves done pipeline status on disconnect", () => {
+      const state = makeStateWithBead("bead-1");
+      // Manually set pipeline to done
+      state.projects.get("/test/project")!.pipelines.get("pipe-1")!.status = "done";
+
+      const result = boardReducer(state, {
+        type: "PROJECT_DISCONNECTED",
+        payload: {
+          projectPath: "/test/project",
+          pluginId: "plugin-1",
+          projectName: "project",
+          reason: "heartbeat timeout",
+        },
+      });
+
+      const pipeline = result.projects.get("/test/project")!.pipelines.get("pipe-1")!;
+      expect(pipeline.status).toBe("done");
+    });
+
     it("returns state unchanged for unknown project", () => {
       const result = boardReducer(initialState, {
         type: "PROJECT_DISCONNECTED",

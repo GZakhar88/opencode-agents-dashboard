@@ -617,10 +617,18 @@ function boardReducer(
       const existing = state.projects.get(projectPath);
       if (!existing) return state;
 
+      // Clone pipelines and mark active ones as idle
+      const newPipelines = cloneMap(existing.pipelines);
+      for (const [key, pipeline] of newPipelines) {
+        if (pipeline.status === "active") {
+          newPipelines.set(key, { ...pipeline, status: "idle" });
+        }
+      }
+
       const newProjects = cloneMap(state.projects);
       newProjects.set(projectPath, {
         ...existing,
-        pipelines: cloneMap(existing.pipelines),
+        pipelines: newPipelines,
         connected: false,
       });
 

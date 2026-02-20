@@ -98,6 +98,40 @@ describe("StateManager - Registration", () => {
     );
   });
 
+  it("deregistering a plugin marks active pipelines as idle", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    // Create an active pipeline via pipeline:started
+    sm.processEvent("p1", "pipeline:started", {
+      pipelineId: "pipe-1",
+      title: "Active pipeline",
+    });
+
+    const beforeProject = sm.getState().projects.get("/path/project-a")!;
+    expect(beforeProject.pipelines.get("pipe-1")!.status).toBe("active");
+
+    sm.deregisterPlugin("p1");
+
+    const afterProject = sm.getState().projects.get("/path/project-a")!;
+    expect(afterProject.pipelines.get("pipe-1")!.status).toBe("idle");
+  });
+
+  it("deregistering a plugin does not change done pipelines", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    sm.processEvent("p1", "pipeline:started", {
+      pipelineId: "pipe-1",
+      title: "Done pipeline",
+    });
+    sm.processEvent("p1", "pipeline:done", { pipelineId: "pipe-1" });
+
+    const beforeProject = sm.getState().projects.get("/path/project-a")!;
+    expect(beforeProject.pipelines.get("pipe-1")!.status).toBe("done");
+
+    sm.deregisterPlugin("p1");
+
+    const afterProject = sm.getState().projects.get("/path/project-a")!;
+    expect(afterProject.pipelines.get("pipe-1")!.status).toBe("done");
+  });
+
   it("deregister returns null for unknown pluginId", () => {
     expect(sm.deregisterPlugin("nonexistent")).toBeNull();
   });
@@ -1069,6 +1103,35 @@ describe("StateManager - Disk Persistence", () => {
     expect(pipeline.beads.size).toBe(1);
     expect(pipeline.beads.get("bd-abc")!.stage).toBe("orchestrator");
     expect(pipeline.beads.get("bd-abc")!.claimedAt).toBeGreaterThan(0);
+    // Active pipelines should be marked idle on load (no session running)
+    expect(pipeline.status).toBe("idle");
+
+    sm2.destroy();
+  });
+
+  it("marks active pipelines as idle on load, preserves done pipelines", async () => {
+    const sm1 = createManager();
+    sm1.registerPlugin("p1", "/path/project-a", "project-a");
+
+    // Create two pipelines: one active, one done
+    sm1.processEvent("p1", "pipeline:started", {
+      pipelineId: "pipe-active",
+      title: "Active pipeline",
+    });
+    sm1.processEvent("p1", "pipeline:started", {
+      pipelineId: "pipe-done",
+      title: "Done pipeline",
+    });
+    sm1.processEvent("p1", "pipeline:done", { pipelineId: "pipe-done" });
+
+    sm1.persistNow();
+    sm1.destroy();
+
+    const sm2 = createManager();
+    const project = sm2.getState().projects.get("/path/project-a")!;
+
+    expect(project.pipelines.get("pipe-active")!.status).toBe("idle");
+    expect(project.pipelines.get("pipe-done")!.status).toBe("done");
 
     sm2.destroy();
   });

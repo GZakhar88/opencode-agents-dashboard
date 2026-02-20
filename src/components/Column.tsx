@@ -85,7 +85,7 @@ export function Column({ columnId, beads }: ColumnProps) {
       </div>
 
       {/* Bead list (scrollable, animated) */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="max-h-[calc(100vh-220px)] flex-1">
         <div
           role="list"
           className="flex min-h-[120px] flex-col gap-2 px-2 pb-2"

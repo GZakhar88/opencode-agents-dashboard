@@ -26,7 +26,7 @@ export function LoadingSkeleton() {
       </div>
 
       {/* Columns skeleton */}
-      <div className="flex gap-3 pl-11 overflow-x-auto">
+      <div className="flex gap-3 overflow-x-auto pl-11 scrollbar-thin">
         {Array.from({ length: 8 }).map((_, i) => (
           <div
             key={i}

@@ -57,3 +57,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Active agent card pulse glow — subtle ring animation for cards with an active agent */
+@keyframes agent-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(96, 165, 250, 0.35);
+  }
+}
+
+.animate-agent-pulse {
+  animation: agent-pulse 2s ease-in-out infinite;
+}
+
+/* Respect OS-level reduced-motion preference for CSS animations */
+@media (prefers-reduced-motion: reduce) {
+  .animate-agent-pulse {
+    animation: none;
+  }
+}
+
+/* Ensure scrollbar styling is consistent in dark mode */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+}

@@ -55,9 +55,8 @@ const cardTransition = {
 const ERROR_CARD_STYLES =
   "border-red-500/60 bg-red-500/5 ring-1 ring-red-500/20 shadow-[0_0_8px_rgba(239,68,68,0.1)]";
 
-/** Active agent card: blue ring + glow pulse */
-const ACTIVE_CARD_STYLES =
-  "ring-1 ring-blue-400/60 shadow-[0_0_8px_rgba(96,165,250,0.2)]";
+/** Active agent card: blue ring + animated glow pulse */
+const ACTIVE_CARD_STYLES = "ring-1 ring-blue-400/60 animate-agent-pulse";
 
 export function BeadCard({ bead }: BeadCardProps) {
   const priorityColor = PRIORITY_COLORS[bead.priority] ?? PRIORITY_COLORS[3];
@@ -120,7 +119,7 @@ export function BeadCard({ bead }: BeadCardProps) {
 
         {/* Error message preview (visible directly on card) */}
         {isError && bead.error && (
-          <p className="mt-1.5 line-clamp-2 rounded bg-red-500/10 px-1.5 py-1 text-[10px] leading-tight text-red-400">
+          <p className="mt-1.5 line-clamp-2 break-words rounded bg-red-500/10 px-1.5 py-1 text-[10px] leading-tight text-red-400">
             {bead.error}
           </p>
         )}
@@ -139,7 +138,9 @@ export function BeadCard({ bead }: BeadCardProps) {
         >
           <div className="flex items-start gap-2">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
-            <p className="text-xs text-popover-foreground">{bead.error}</p>
+            <p className="max-h-40 overflow-y-auto break-words text-xs text-popover-foreground">
+              {bead.error}
+            </p>
           </div>
         </TooltipContent>
       </Tooltip>

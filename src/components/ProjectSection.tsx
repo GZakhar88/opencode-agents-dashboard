@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { PipelineHeader } from "@/components/PipelineHeader";
 import { Board } from "@/components/Board";
 import { formatLastSeen } from "@/lib/format";
+import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
 interface ProjectSectionProps {
@@ -36,7 +37,10 @@ export function ProjectSection({ project }: ProjectSectionProps) {
         <button
           type="button"
           aria-expanded={isOpen}
-          className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors hover:bg-accent/50"
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors hover:bg-accent/50",
+            FOCUS_RING,
+          )}
         >
           {/* Expand/collapse chevron */}
           <ChevronRight

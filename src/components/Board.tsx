@@ -37,7 +37,7 @@ export function Board({ pipeline }: BoardProps) {
   }
 
   return (
-    <div className="overflow-x-auto pb-2">
+    <div className="overflow-x-auto pb-2 scrollbar-thin">
       <LayoutGroup id={pipeline.id}>
         <div className="flex gap-3">
           {COLUMNS.map((columnId) => (

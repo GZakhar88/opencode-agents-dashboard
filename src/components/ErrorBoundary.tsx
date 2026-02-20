@@ -8,6 +8,8 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { FOCUS_RING } from "@/lib/styles";
+import { cn } from "@/lib/utils";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -55,7 +57,10 @@ export class ErrorBoundary extends Component<
       }
 
       return (
-        <div role="alert" className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div
+          role="alert"
+          className="flex min-h-screen items-center justify-center bg-background p-6"
+        >
           <div className="w-full max-w-md rounded-lg border border-red-500/30 bg-red-500/5 p-6">
             {/* Icon */}
             <div className="mb-4 flex justify-center">
@@ -96,7 +101,10 @@ export class ErrorBoundary extends Component<
               <button
                 type="button"
                 onClick={this.handleRetry}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent",
+                  FOCUS_RING,
+                )}
               >
                 <RefreshCw className="h-4 w-4" />
                 Try Again
@@ -104,7 +112,10 @@ export class ErrorBoundary extends Component<
               <button
                 type="button"
                 onClick={this.handleReload}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90",
+                  FOCUS_RING,
+                )}
               >
                 Reload Page
               </button>

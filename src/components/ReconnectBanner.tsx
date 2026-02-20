@@ -122,7 +122,7 @@ export function ReconnectBanner({ status, onReconnect }: ReconnectBannerProps) {
                     <button
                       type="button"
                       onClick={handleManualReconnect}
-                      className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/20"
+                      className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                     >
                       <RefreshCw className="h-3 w-3" />
                       Retry now
@@ -142,7 +142,7 @@ export function ReconnectBanner({ status, onReconnect }: ReconnectBannerProps) {
                 <button
                   type="button"
                   onClick={handleManualReconnect}
-                  className="ml-2 inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-200 transition-colors hover:bg-red-500/20"
+                  className="ml-2 inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-200 transition-colors hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                 >
                   <RefreshCw className="h-3 w-3" />
                   Reconnect

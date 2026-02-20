@@ -21,6 +21,8 @@ import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { Link2Off, ServerOff } from "lucide-react";
+import { FOCUS_RING } from "@/lib/styles";
+import { cn } from "@/lib/utils";
 
 export default function App() {
   return (
@@ -120,7 +122,10 @@ function EmptyState() {
 /** Disconnected state — server unreachable, helpful recovery message */
 function DisconnectedState({ onReconnect }: { onReconnect: () => void }) {
   return (
-    <div role="alert" className="flex flex-col items-center justify-center py-24">
+    <div
+      role="alert"
+      className="flex flex-col items-center justify-center py-24"
+    >
       <div className="mb-4 rounded-full bg-red-500/10 p-4">
         <ServerOff className="h-8 w-8 text-red-400" />
       </div>
@@ -144,7 +149,10 @@ function DisconnectedState({ onReconnect }: { onReconnect: () => void }) {
       <button
         type="button"
         onClick={onReconnect}
-        className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        className={cn(
+          "inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent",
+          FOCUS_RING,
+        )}
       >
         Try Reconnecting
       </button>

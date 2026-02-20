@@ -11,5 +11,11 @@ server/.test-state.json
 # Bun
 bun.lockb
 
+# TypeScript build info
+*.tsbuildinfo
+
+# TypeScript declaration output (from composite tsconfig)
+vite.config.d.ts
+
 # OS
 .DS_Store

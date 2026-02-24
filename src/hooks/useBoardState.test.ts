@@ -53,7 +53,7 @@ function makeStateWithBead(
     priority: 2,
     issueType: "task",
     bdStatus: "open",
-    stage: "backlog",
+    stage: "ready",
     stageStartedAt: 1000,
     ...beadOverrides,
   });
@@ -76,6 +76,7 @@ function makeStateWithBead(
     connected: true,
     pipelines,
     lastBeadSnapshot: [],
+    columns: [],
   });
 
   return { projects };
@@ -114,16 +115,16 @@ describe("boardReducer", () => {
                     beads: [
                       [
                         "bead-1",
-                        {
-                          id: "bead-1",
-                          title: "Test",
-                          description: "",
-                          priority: 1,
-                          issueType: "task",
-                          bdStatus: "open",
-                          stage: "backlog",
-                          stageStartedAt: 1000,
-                        },
+                      {
+                        id: "bead-1",
+                        title: "Test",
+                        description: "",
+                        priority: 1,
+                        issueType: "task",
+                        bdStatus: "open",
+                        stage: "ready",
+                        stageStartedAt: 1000,
+                      },
                       ],
                     ],
                   },
@@ -173,7 +174,7 @@ describe("boardReducer", () => {
                     priority: 2,
                     issueType: "task",
                     bdStatus: "open",
-                    stage: "backlog",
+                    stage: "ready",
                     stageStartedAt: 1000,
                   },
                 ],
@@ -286,7 +287,7 @@ describe("boardReducer", () => {
       const pipeline = project.pipelines.get("pipe-1")!;
       expect(pipeline.beads.has("new-bead")).toBe(true);
       const beadState = pipeline.beads.get("new-bead")!;
-      expect(beadState.stage).toBe("backlog");
+      expect(beadState.stage).toBe("ready");
       expect(beadState.title).toBe("Test Bead");
     });
 
@@ -314,7 +315,7 @@ describe("boardReducer", () => {
       expect(pipeline.beads.get("bead-1")!.stage).toBe("builder");
     });
 
-    it("maps in_progress status to orchestrator stage", () => {
+    it("maps in_progress status to ready stage", () => {
       const bead = makeBeadRecord({ id: "bead-ip", status: "in_progress" });
       const result = boardReducer(initialState, {
         type: "BEAD_DISCOVERED",
@@ -329,7 +330,7 @@ describe("boardReducer", () => {
       const pipeline = result.projects
         .get("/test/project")!
         .pipelines.get("pipe-1")!;
-      expect(pipeline.beads.get("bead-ip")!.stage).toBe("orchestrator");
+      expect(pipeline.beads.get("bead-ip")!.stage).toBe("ready");
     });
 
     it("maps closed status to done stage", () => {
@@ -422,7 +423,7 @@ describe("boardReducer", () => {
   // ----------------------------------------------------------
   describe("BEAD_CLAIMED", () => {
     it("transitions existing bead to orchestrator stage", () => {
-      const state = makeStateWithBead("bead-1", { stage: "backlog" });
+      const state = makeStateWithBead("bead-1", { stage: "ready" });
       const result = boardReducer(state, {
         type: "BEAD_CLAIMED",
         payload: {
@@ -574,7 +575,7 @@ describe("boardReducer", () => {
       expect(bead.agentSessionId).toBe("old-session");
     });
 
-    it("rejects invalid stage values (e.g. designer)", () => {
+    it("accepts any string as a valid stage (e.g. designer)", () => {
       const state = makeStateWithBead("bead-1", { stage: "orchestrator" });
       const result = boardReducer(state, {
         type: "BEAD_STAGE",
@@ -582,17 +583,17 @@ describe("boardReducer", () => {
           projectPath: "/test/project",
           timestamp: Date.now(),
           beadId: "bead-1",
-          stage: "designer" as any,
+          stage: "designer",
           pipelineId: "pipe-1",
         },
       });
 
-      // Should return original state — designer is not a valid Stage
+      // Stage is now any string — designer is accepted
       const bead = result.projects
         .get("/test/project")!
         .pipelines.get("pipe-1")!
         .beads.get("bead-1")!;
-      expect(bead.stage).toBe("orchestrator");
+      expect(bead.stage).toBe("designer");
     });
 
     it("returns state unchanged when beadId is missing", () => {
@@ -712,7 +713,7 @@ describe("boardReducer", () => {
         .get("/test/project")!
         .pipelines.get("pipe-1")!;
       expect(pipeline.beads.has("nonexistent")).toBe(false);
-      expect(pipeline.beads.get("bead-1")!.stage).toBe("backlog");
+      expect(pipeline.beads.get("bead-1")!.stage).toBe("ready");
     });
   });
 
@@ -1531,7 +1532,7 @@ describe("boardReducer", () => {
           .get("/test/project")!
           .pipelines.get("pipe-1")!
           .beads.get("lifecycle-bead")!.stage,
-      ).toBe("backlog");
+      ).toBe("ready");
 
       // Claim
       state = boardReducer(state, {
@@ -1628,7 +1629,7 @@ describe("boardReducer", () => {
           .get("/test/project")!
           .pipelines.get("pipe-1")!
           .beads.get("error-bead")!.stage,
-      ).toBe("backlog");
+      ).toBe("ready");
 
       // Claim
       state = boardReducer(state, {
@@ -1813,30 +1814,30 @@ describe("boardReducer", () => {
       expect(bead.bdStatus).toBe("closed");
     });
 
-    it("error bead does not auto-progress on BEAD_STAGE to invalid stage", () => {
+    it("error bead can be moved to any stage via BEAD_STAGE", () => {
       const state = makeStateWithBead("bead-1", {
         stage: "error",
         error: "Something failed",
       });
 
-      // Attempting to set stage to "designer" (invalid) should be rejected
+      // Setting stage to "designer" is now valid (Stage is string)
       const result = boardReducer(state, {
         type: "BEAD_STAGE",
         payload: {
           projectPath: "/test/project",
           timestamp: Date.now(),
           beadId: "bead-1",
-          stage: "designer" as any,
+          stage: "designer",
           pipelineId: "pipe-1",
         },
       });
 
-      // Should still be in error
+      // Should move to designer stage
       const bead = result.projects
         .get("/test/project")!
         .pipelines.get("pipe-1")!
         .beads.get("bead-1")!;
-      expect(bead.stage).toBe("error");
+      expect(bead.stage).toBe("designer");
       expect(bead.error).toBe("Something failed");
     });
 

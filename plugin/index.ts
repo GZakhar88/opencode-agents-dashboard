@@ -6,8 +6,10 @@
  *
  * Provides:
  * - Custom tools: dashboard_start, dashboard_stop, dashboard_status, dashboard_open
- * - Context injection: bd prime + pipeline guidance into orchestrator sessions
- * - Pipeline tracking: bead state diffs, stage detection, agent lifecycle
+ * - Context injection: bd prime + pipeline guidance (conditional on agent detection)
+ * - Agent discovery: reads agent configs from opencode.json, .opencode/agents/, ~/.config/opencode/agents/
+ * - Dynamic columns: generates column config from discovered agents
+ * - Bead tracking: bead state diffs, stage detection, agent lifecycle
  * - Server bridge: auto-start, registration, heartbeat, event pushing
  *
  * The plugin loads dormant. The server only starts when the LLM calls
@@ -17,9 +19,10 @@
 
 import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
-import type { BeadRecord, BeadDiff } from "../shared/types";
+import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
 import { isServerRunning, readPid, writePid, removePid } from "../server/pid";
-import { join } from "path";
+import { join, resolve } from "path";
+import { readdir, readFile, copyFile, mkdir } from "fs/promises";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -70,10 +73,28 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let currentBeadId: string | null = null;
 let sessionToAgent = new Map<string, string>();
 let pendingAgentType: string | null = null;
+let currentAgentName: string | null = null; // tracks the agent handling the current chat.message
 
-// ─── Pipeline Guidance (injected into orchestrator sessions) ───
+// Agent discovery results
+let discoveredAgents: DiscoveredAgent[] = [];
+let hasPipelineAgents = false;
 
-const PIPELINE_GUIDANCE = `<pipeline-guidance>
+// ─── Agent Discovery Types ────────────────────────────────────
+
+interface DiscoveredAgent {
+  name: string; // filename without .md extension
+  description: string;
+  mode: string; // "primary", "subagent", "all"
+  color: string | null; // hex color from frontmatter
+  hidden: boolean;
+  source: "project" | "global" | "json";
+}
+
+// ─── Pipeline Guidance (conditionally injected when pipeline agents detected) ───
+
+function buildPipelineGuidance(): string | null {
+  if (!hasPipelineAgents) return null;
+  return `<pipeline-guidance>
 ## Beads CLI Usage
 
 Use the \`bash\` tool for all beads operations. Always use \`--json\` flag:
@@ -97,6 +118,7 @@ When working on beads:
 
 Include the bead ID in Task descriptions (e.g., "Build: [bd-a1b2] Add auth middleware").
 </pipeline-guidance>`;
+}
 
 const injectedSessions = new Set<string>();
 
@@ -124,7 +146,10 @@ function buildContextMessage(bdPrime: string | null): string {
   if (bdPrime) {
     parts.push(`<beads-context>\n${bdPrime}\n</beads-context>`);
   }
-  parts.push(PIPELINE_GUIDANCE);
+  const guidance = buildPipelineGuidance();
+  if (guidance) {
+    parts.push(guidance);
+  }
   return parts.join("\n\n");
 }
 
@@ -232,6 +257,266 @@ async function hasExistingContext(client: any, sessionID: string): Promise<boole
   } catch {
     return false;
   }
+}
+
+// ─── Agent Discovery ───────────────────────────────────────────
+
+/**
+ * Parse YAML-like frontmatter from a markdown agent file.
+ * Extracts top-level scalar keys only (description, mode, color, hidden).
+ */
+function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  const frontmatter: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const kv = line.match(/^(\w[\w-]*)\s*:\s*(.+)$/);
+    if (kv) {
+      frontmatter[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, "");
+    }
+  }
+  return frontmatter;
+}
+
+/**
+ * Discover agents from markdown files in a directory.
+ */
+async function discoverAgentsFromDir(
+  dir: string,
+  source: "project" | "global",
+): Promise<DiscoveredAgent[]> {
+  const agents: DiscoveredAgent[] = [];
+  try {
+    const entries = await readdir(dir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const name = entry.replace(/\.md$/, "");
+      try {
+        const content = await readFile(join(dir, entry), "utf-8");
+        const fm = parseFrontmatter(content);
+        agents.push({
+          name,
+          description: fm.description || "",
+          mode: fm.mode || "subagent",
+          color: fm.color || null,
+          hidden: fm.hidden === "true",
+          source,
+        });
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+  } catch {
+    // Directory doesn't exist — that's fine
+  }
+  return agents;
+}
+
+/**
+ * Discover agents from opencode.json "agent" key.
+ */
+async function discoverAgentsFromJson(projectDir: string): Promise<DiscoveredAgent[]> {
+  const agents: DiscoveredAgent[] = [];
+  try {
+    const content = await readFile(join(projectDir, "opencode.json"), "utf-8");
+    const config = JSON.parse(content);
+    const agentConfig = config?.agent;
+    if (agentConfig && typeof agentConfig === "object") {
+      for (const [name, cfg] of Object.entries(agentConfig)) {
+        if (!cfg || typeof cfg !== "object") continue;
+        const c = cfg as Record<string, unknown>;
+        agents.push({
+          name,
+          description: (c.description as string) || "",
+          mode: (c.mode as string) || "subagent",
+          color: (c.color as string) || null,
+          hidden: c.hidden === true,
+          source: "json",
+        });
+      }
+    }
+  } catch {
+    // opencode.json doesn't exist or invalid — that's fine
+  }
+  return agents;
+}
+
+/**
+ * Discover all agents from all sources. Later sources override earlier ones (by name).
+ * Order: opencode.json < .opencode/agents/ < ~/.config/opencode/agents/
+ */
+async function discoverAllAgents(projectDir: string): Promise<DiscoveredAgent[]> {
+  const [jsonAgents, projectAgents, globalAgents] = await Promise.all([
+    discoverAgentsFromJson(projectDir),
+    discoverAgentsFromDir(join(projectDir, ".opencode", "agents"), "project"),
+    discoverAgentsFromDir(
+      join(process.env.HOME || "~", ".config", "opencode", "agents"),
+      "global",
+    ),
+  ]);
+
+  // Merge: later sources win
+  const byName = new Map<string, DiscoveredAgent>();
+  for (const agent of [...jsonAgents, ...projectAgents, ...globalAgents]) {
+    byName.set(agent.name, agent);
+  }
+  return Array.from(byName.values());
+}
+
+/** Known pipeline agent names for ordering */
+const PIPELINE_AGENT_ORDER: Record<string, number> = {
+  "pipeline-builder": 1,
+  "pipeline-refactor": 2,
+  "pipeline-reviewer": 3,
+  "pipeline-committer": 4,
+};
+
+/** Default color palette for agent columns */
+const DEFAULT_AGENT_COLORS = [
+  "#8b5cf6", // violet
+  "#3b82f6", // blue
+  "#06b6d4", // cyan
+  "#f59e0b", // amber
+  "#10b981", // emerald
+  "#ec4899", // pink
+  "#f97316", // orange
+  "#6366f1", // indigo
+];
+
+/**
+ * Generate column config from discovered agents.
+ *
+ * Layout:
+ * - "ready" always first
+ * - orchestrator before pipeline agents
+ * - pipeline agents in known order
+ * - other agents alphabetically
+ * - "done" and "error" always last
+ */
+function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
+  const columns: ColumnConfig[] = [];
+  let order = 0;
+
+  // Fixed bookend: ready
+  columns.push({
+    id: "ready",
+    label: "Ready",
+    type: "status",
+    color: "#64748b",
+    order: order++,
+  });
+
+  // Separate agents into categories
+  const orchestratorAgent = agents.find((a) => a.name === "orchestrator");
+  const pipelineAgents = agents
+    .filter((a) => a.name in PIPELINE_AGENT_ORDER)
+    .sort((a, b) => (PIPELINE_AGENT_ORDER[a.name] ?? 99) - (PIPELINE_AGENT_ORDER[b.name] ?? 99));
+  const otherAgents = agents
+    .filter(
+      (a) =>
+        a.name !== "orchestrator" && !(a.name in PIPELINE_AGENT_ORDER),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  let colorIndex = 0;
+  const nextColor = (agent: DiscoveredAgent): string => {
+    if (agent.color) return agent.color;
+    return DEFAULT_AGENT_COLORS[colorIndex++ % DEFAULT_AGENT_COLORS.length];
+  };
+
+  // Orchestrator first (if present)
+  if (orchestratorAgent) {
+    columns.push({
+      id: orchestratorAgent.name,
+      label: formatAgentLabel(orchestratorAgent.name),
+      type: "agent",
+      color: nextColor(orchestratorAgent),
+      order: order++,
+    });
+  }
+
+  // Pipeline agents in sequence
+  for (const agent of pipelineAgents) {
+    columns.push({
+      id: agent.name,
+      label: formatAgentLabel(agent.name),
+      type: "agent",
+      color: nextColor(agent),
+      order: order++,
+    });
+  }
+
+  // Other agents alphabetically
+  for (const agent of otherAgents) {
+    columns.push({
+      id: agent.name,
+      label: formatAgentLabel(agent.name),
+      type: "agent",
+      color: nextColor(agent),
+      order: order++,
+    });
+  }
+
+  // Fixed bookends: done and error
+  columns.push({
+    id: "done",
+    label: "Done",
+    type: "status",
+    color: "#22c55e",
+    order: order++,
+  });
+  columns.push({
+    id: "error",
+    label: "Error",
+    type: "status",
+    color: "#ef4444",
+    order: order++,
+  });
+
+  return columns;
+}
+
+/**
+ * Format agent name into a human-readable label.
+ * "pipeline-builder" → "Builder", "orchestrator" → "Orchestrator"
+ */
+function formatAgentLabel(name: string): string {
+  // Strip "pipeline-" prefix for cleaner labels
+  const display = name.startsWith("pipeline-") ? name.slice("pipeline-".length) : name;
+  return display.charAt(0).toUpperCase() + display.slice(1);
+}
+
+/**
+ * Check if the shipped agent files are installed in a target directory.
+ */
+async function checkAgentsInstalled(targetDir: string): Promise<boolean> {
+  const requiredAgents = ["orchestrator.md", "pipeline-builder.md"];
+  try {
+    const entries = await readdir(targetDir);
+    return requiredAgents.every((f) => entries.includes(f));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy shipped agent files to a target directory.
+ */
+async function installAgents(targetDir: string): Promise<string[]> {
+  const shippedDir = join(import.meta.dir, "../agents");
+  const installed: string[] = [];
+  try {
+    await mkdir(targetDir, { recursive: true });
+    const entries = await readdir(shippedDir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      await copyFile(join(shippedDir, entry), join(targetDir, entry));
+      installed.push(entry);
+    }
+  } catch (err) {
+    logError(`Failed to install agents to ${targetDir}:`, err);
+  }
+  return installed;
 }
 
 // ─── Server Lifecycle ──────────────────────────────────────────
@@ -541,7 +826,7 @@ async function processDiffs(diffs: BeadDiff[]): Promise<void> {
         await pushEvent("bead:claimed", {
           beadId: diff.bead.id,
           bead: diff.bead,
-          stage: "orchestrator",
+          stage: currentAgentName || "ready",
         });
       }
 
@@ -570,21 +855,22 @@ async function processDiffs(diffs: BeadDiff[]): Promise<void> {
   }
 }
 
-// ─── Pipeline Stage Helpers ────────────────────────────────────
+// ─── Agent Stage Helpers ───────────────────────────────────────
 
-function mapSubagentTypeToStage(agentType: string): string | null {
-  const mapping: Record<string, string> = {
-    "pipeline-builder": "builder",
-    "pipeline-refactor": "refactor",
-    "pipeline-reviewer": "reviewer",
-    "pipeline-committer": "committer",
-    builder: "builder",
-    refactor: "refactor",
-    reviewer: "reviewer",
-    committer: "committer",
-    designer: "designer",
-  };
-  return mapping[agentType] ?? null;
+/**
+ * Check if an agent name corresponds to a known agent column.
+ * Returns the agent name as the column/stage ID directly.
+ */
+function agentNameToStage(agentName: string): string | null {
+  // Check if this agent is one we discovered
+  const known = discoveredAgents.find((a) => a.name === agentName);
+  if (known) return agentName;
+  // Also accept short names that match pipeline- prefix
+  const withPrefix = `pipeline-${agentName}`;
+  const prefixed = discoveredAgents.find((a) => a.name === withPrefix);
+  if (prefixed) return prefixed.name;
+  // Accept any agent name — the dashboard will handle unknown columns gracefully
+  return agentName;
 }
 
 function extractBeadId(text: string): string | null {
@@ -601,6 +887,14 @@ async function startupSequence(
   port: number,
 ): Promise<string> {
   serverPort = port;
+
+  // Discover agents first (needed for column config and pipeline guidance decision)
+  discoveredAgents = await discoverAllAgents(pPath);
+  hasPipelineAgents = discoveredAgents.some((a) => a.name in PIPELINE_AGENT_ORDER);
+  log(
+    `Discovered ${discoveredAgents.length} agent(s)` +
+      (hasPipelineAgents ? " (pipeline agents present)" : " (no pipeline agents)"),
+  );
 
   // Check if already running (via PID file)
   const existing = await isServerRunning(true);
@@ -630,6 +924,11 @@ async function startupSequence(
 
   pluginId = id;
   serverReady = true;
+
+  // Generate and send column config
+  const columns = generateColumnConfig(discoveredAgents);
+  await pushEvent("columns:update", { columns });
+  log(`Sent column config: ${columns.length} columns`);
 
   // Start heartbeat
   startHeartbeat();
@@ -898,9 +1197,14 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       const model = input.model;
       const agent = input.agent;
 
-      // Auto-detect orchestrator and activate if dormant
-      if (!activated && !activating && agent === "orchestrator") {
-        log(`Orchestrator detected — activating plugin`);
+      // Track current agent for bead:claimed stage tracking
+      if (agent) {
+        currentAgentName = agent;
+      }
+
+      // Auto-activate on first primary agent session if dormant
+      if (!activated && !activating) {
+        log(`Primary session detected (agent: ${agent ?? "default"}) — activating plugin`);
         activating = true;
         try {
           await startupSequence(
@@ -915,15 +1219,6 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
         } finally {
           activating = false;
         }
-      }
-
-      // Skip non-orchestrator sessions
-      if (agent && agent !== "orchestrator") {
-        if (!injectedSessions.has(sessionID)) {
-          injectedSessions.add(sessionID);
-          log(`Skipping non-orchestrator session ${sessionID} (agent: ${agent})`);
-        }
-        return;
       }
 
       if (injectedSessions.has(sessionID)) return;
@@ -961,7 +1256,7 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
           args.agent ?? args.subagent_type ?? args.agentName;
         if (!agentName || typeof agentName !== "string") return;
 
-        const stage = mapSubagentTypeToStage(agentName);
+        const stage = agentNameToStage(agentName);
         if (!stage) {
           log(`Task tool invoked with unknown agent type: ${agentName}`);
           return;
@@ -1062,19 +1357,10 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
             log(`Mapped child session ${session.id} → ${agentType} (from pending Task invocation)`);
           } else if (session.title) {
             const titleLower = session.title.toLowerCase();
-            for (const candidate of [
-              "pipeline-builder",
-              "pipeline-refactor",
-              "pipeline-reviewer",
-              "pipeline-committer",
-              "builder",
-              "refactor",
-              "reviewer",
-              "committer",
-              "designer",
-            ]) {
-              if (titleLower.includes(candidate)) {
-                agentType = mapSubagentTypeToStage(candidate);
+            // Match against all discovered agent names
+            for (const agent of discoveredAgents) {
+              if (titleLower.includes(agent.name)) {
+                agentType = agent.name;
                 log(`Mapped child session ${session.id} → ${agentType} (from title)`);
                 break;
               }

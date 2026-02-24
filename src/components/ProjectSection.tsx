@@ -124,6 +124,7 @@ export function ProjectSection({ project }: ProjectSectionProps) {
                 <Board 
                   pipeline={pipeline}
                   isExpanded={expandedPipelines.has(pipeline.id)}
+                  columns={project.columns}
                 />
               </div>
             ))

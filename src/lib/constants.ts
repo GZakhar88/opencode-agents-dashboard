@@ -1,32 +1,22 @@
 /**
  * Column definitions and constants for the Kanban board.
+ *
+ * Columns are now dynamic (driven by agent discovery in the plugin).
+ * This file provides default/fallback columns (status bookends only)
+ * and shared UI constants.
  */
 
-/** Pipeline stages as Kanban columns */
-export const COLUMNS = [
-  "backlog",
-  "orchestrator",
-  "builder",
-  "refactor",
-  "reviewer",
-  "committer",
-  "error",
-  "done",
-] as const;
+import type { ColumnConfig } from "@shared/types";
 
-export type ColumnId = (typeof COLUMNS)[number];
-
-/** Display labels for each column */
-export const COLUMN_LABELS: Record<ColumnId, string> = {
-  backlog: "Backlog",
-  orchestrator: "Orchestrator",
-  builder: "Builder",
-  refactor: "Refactor",
-  reviewer: "Reviewer",
-  committer: "Committer",
-  error: "Error",
-  done: "Done",
-};
+/**
+ * Default columns shown when no agent-driven column config has been received.
+ * Only the status bookends: ready, done, error.
+ */
+export const DEFAULT_COLUMNS: ColumnConfig[] = [
+  { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+  { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+  { id: "error", label: "Error", type: "status", color: "#ef4444", order: 2 },
+];
 
 /** Priority color classes (Tailwind) */
 export const PRIORITY_COLORS: Record<number, string> = {

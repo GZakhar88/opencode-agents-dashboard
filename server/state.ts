@@ -21,6 +21,7 @@ import type {
   DashboardState,
   PipelineStatus,
   Stage,
+  ColumnConfig,
 } from "../shared/types";
 
 // Re-export types so existing consumers (routes.ts, tests) continue to work
@@ -46,6 +47,7 @@ interface SerializedProjectState {
   connected: boolean;
   pipelines: [string, SerializedPipeline][];
   lastBeadSnapshot: BeadRecord[];
+  columns: ColumnConfig[];
 }
 
 interface SerializedDashboardState {
@@ -117,6 +119,7 @@ export class StateManager {
         connected: project.connected,
         pipelines,
         lastBeadSnapshot: project.lastBeadSnapshot,
+        columns: project.columns,
       });
     }
     return { projects };
@@ -146,6 +149,7 @@ export class StateManager {
         connected: true,
         pipelines: new Map(),
         lastBeadSnapshot: [],
+        columns: [],
       };
       this.state.projects.set(projectPath, project);
     }
@@ -247,6 +251,9 @@ export class StateManager {
       case "pipeline:done":
         return this.handlePipelineDone(project, data);
 
+      case "columns:update":
+        return this.handleColumnsUpdate(project, data);
+
       default:
         // Unknown event — pass through with projectPath enrichment
         return {
@@ -309,7 +316,7 @@ export class StateManager {
   ): { event: string; data: Record<string, unknown> } {
     const beadId = (data.beadId as string) || (data.bead as BeadRecord)?.id;
     const beadRecord = data.bead as BeadRecord | undefined;
-    const stage = (data.stage as string) || "orchestrator";
+    const stage = (data.stage as string) || "ready";
 
     const pipeline = this.getOrCreateDefaultPipeline(project);
 
@@ -317,7 +324,7 @@ export class StateManager {
       let beadState = pipeline.beads.get(beadId);
       if (beadState) {
         beadState.bdStatus = "in_progress";
-        beadState.stage = "orchestrator";
+        beadState.stage = stage;
         beadState.stageStartedAt = Date.now();
         beadState.claimedAt = Date.now();
       } else if (beadRecord) {
@@ -329,7 +336,7 @@ export class StateManager {
           priority: beadRecord.priority ?? 1,
           issueType: beadRecord.issue_type || "task",
           bdStatus: "in_progress",
-          stage: "orchestrator",
+          stage,
           stageStartedAt: Date.now(),
           claimedAt: Date.now(),
         };
@@ -699,6 +706,27 @@ export class StateManager {
     };
   }
 
+  private handleColumnsUpdate(
+    project: ProjectState,
+    data: Record<string, unknown>
+  ): { event: string; data: Record<string, unknown> } {
+    const columns = data.columns as ColumnConfig[] | undefined;
+
+    if (Array.isArray(columns)) {
+      project.columns = columns;
+      this.schedulePersist();
+    }
+
+    return {
+      event: "columns:update",
+      data: {
+        ...data,
+        projectPath: project.projectPath,
+        columns: project.columns,
+      },
+    };
+  }
+
   // --- Helpers ---
 
   /** Get or create the default pipeline for a project */
@@ -722,13 +750,13 @@ export class StateManager {
   private bdStatusToStage(bdStatus: string): BeadState["stage"] {
     switch (bdStatus) {
       case "in_progress":
-        return "orchestrator";
+        return "ready"; // will be moved to agent column via bead:claimed/bead:stage
       case "closed":
         return "done";
       case "blocked":
         return "error";
       default:
-        return "backlog";
+        return "ready";
     }
   }
 
@@ -846,6 +874,7 @@ export class StateManager {
           connected: project.connected,
           pipelines,
           lastBeadSnapshot: project.lastBeadSnapshot,
+          columns: project.columns,
         },
       ]);
     }
@@ -882,6 +911,7 @@ export class StateManager {
         connected: sp.connected,
         pipelines,
         lastBeadSnapshot: sp.lastBeadSnapshot || [],
+        columns: sp.columns || [],
       });
     }
     return { projects };

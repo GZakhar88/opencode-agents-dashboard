@@ -99,7 +99,7 @@ function DashboardApp() {
                   OpenCode Dashboard
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Real-time multi-agent pipeline visualization
+                  Real-time agent activity dashboard
                 </p>
               </div>
               <StatusIndicator status={status} />
@@ -183,8 +183,8 @@ function EmptyState() {
         No projects connected
       </h2>
       <p className="text-sm text-muted-foreground">
-        Start an OpenCode session with the dashboard plugin to see pipelines
-        here.
+        Start an OpenCode session with the dashboard plugin to see agent
+        activity here.
       </p>
     </div>
   );

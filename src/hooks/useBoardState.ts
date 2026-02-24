@@ -38,6 +38,8 @@ import type {
   AgentIdlePayload,
   PipelineStartedPayload,
   PipelineDonePayload,
+  ColumnConfig,
+  ColumnsUpdatePayload,
 } from "@shared/types";
 import type { SSEEvent } from "./useEventSource";
 
@@ -69,7 +71,8 @@ type BoardAction =
   | { type: "PIPELINE_DONE"; payload: PipelineDonePayload }
   | { type: "PROJECT_DISCONNECTED"; payload: SSEProjectDisconnectedPayload }
   | { type: "AGENT_ACTIVE"; payload: WithPipelineId<AgentActivePayload> }
-  | { type: "AGENT_IDLE"; payload: WithPipelineId<AgentIdlePayload> };
+  | { type: "AGENT_IDLE"; payload: WithPipelineId<AgentIdlePayload> }
+  | { type: "COLUMNS_UPDATE"; payload: ColumnsUpdatePayload };
 
 // ============================================================
 // Initial State
@@ -113,6 +116,7 @@ function ensureProject(
       connected: true,
       pipelines: new Map(),
       lastBeadSnapshot: [],
+      columns: [],
     };
     newProjects.set(projectPath, project);
   } else {
@@ -181,36 +185,16 @@ function ensurePipeline(project: ProjectState, pipelineId?: string): Pipeline {
  */
 function bdStatusToStage(bdStatus: string): Stage {
   switch (bdStatus) {
+    case "open":
     case "in_progress":
-      return "orchestrator";
+      return "ready";
     case "closed":
       return "done";
     case "blocked":
       return "error";
     default:
-      return "backlog";
+      return "ready";
   }
-}
-
-/** All valid Stage values for runtime validation. */
-const VALID_STAGES: ReadonlySet<string> = new Set<Stage>([
-  "backlog",
-  "orchestrator",
-  "builder",
-  "refactor",
-  "reviewer",
-  "committer",
-  "done",
-  "error",
-]);
-
-/**
- * Validate and coerce an AgentType / string to a Stage.
- * Returns the value as a Stage if valid, otherwise undefined.
- * This is needed because AgentType includes "designer" which is not a Stage.
- */
-function toStage(value: string): Stage | undefined {
-  return VALID_STAGES.has(value) ? (value as Stage) : undefined;
 }
 
 /**
@@ -337,6 +321,7 @@ function deserializeStateFull(payload: unknown): DashboardState {
       connected: projectData.connected !== false, // default to true
       pipelines,
       lastBeadSnapshot: (projectData.lastBeadSnapshot as BeadRecord[]) || [],
+      columns: (projectData.columns as ColumnConfig[]) || [],
     });
   }
 
@@ -390,13 +375,14 @@ function boardReducer(
           connected: true,
           pipelines: new Map(),
           lastBeadSnapshot: [],
+          columns: [],
         });
       }
 
       return { projects: newProjects };
     }
 
-    // ----- Bead discovered — add to backlog -----
+    // ----- Bead discovered — add to ready -----
     case "BEAD_DISCOVERED": {
       const { projectPath, bead: beadRecord, pipelineId } = action.payload;
       if (!beadRecord?.id) return state;
@@ -413,12 +399,13 @@ function boardReducer(
       return { projects };
     }
 
-    // ----- Bead claimed — move to orchestrator stage -----
+    // ----- Bead claimed — move to agent stage from payload -----
     case "BEAD_CLAIMED": {
       const {
         projectPath,
         beadId,
         bead: beadRecord,
+        stage: claimedStage,
         pipelineId,
       } = action.payload;
       const resolvedBeadId = beadId || beadRecord?.id;
@@ -427,6 +414,7 @@ function boardReducer(
       const { project, projects } = ensureProject(state.projects, projectPath);
       const pipeline = ensurePipeline(project, pipelineId);
 
+      const targetStage = claimedStage || "ready";
       const now = Date.now();
       const existingBead = pipeline.beads.get(resolvedBeadId);
 
@@ -435,14 +423,14 @@ function boardReducer(
         pipeline.beads.set(resolvedBeadId, {
           ...existingBead,
           bdStatus: "in_progress",
-          stage: "orchestrator",
+          stage: targetStage,
           stageStartedAt: now,
           claimedAt: now,
         });
       } else if (beadRecord) {
         // Discovered + claimed in same cycle — create it
         pipeline.beads.set(resolvedBeadId, {
-          ...beadRecordToState(beadRecord, "orchestrator"),
+          ...beadRecordToState(beadRecord, targetStage),
           bdStatus: "in_progress",
           claimedAt: now,
         });
@@ -455,15 +443,11 @@ function boardReducer(
       return { projects };
     }
 
-    // ----- Bead stage transition (builder/refactor/reviewer/committer) -----
+    // ----- Bead stage transition (agent column change) -----
     case "BEAD_STAGE": {
       const { projectPath, beadId, stage, agentSessionId, pipelineId } =
         action.payload;
       if (!beadId || !stage) return state;
-
-      // Validate stage is a known Stage value (AgentType "designer" is not)
-      const validStage = toStage(stage);
-      if (!validStage) return state;
 
       const { project, projects } = ensureProject(state.projects, projectPath);
       const pipeline = ensurePipeline(project, pipelineId);
@@ -472,7 +456,7 @@ function boardReducer(
       if (beadState) {
         pipeline.beads.set(beadId, {
           ...beadState,
-          stage: validStage,
+          stage,
           stageStartedAt: Date.now(),
           ...(agentSessionId ? { agentSessionId } : {}),
         });
@@ -708,6 +692,17 @@ function boardReducer(
       return { projects };
     }
 
+    // ----- Columns update — store dynamic column config for a project -----
+    case "COLUMNS_UPDATE": {
+      const { projectPath, columns } = action.payload;
+      if (!projectPath || !Array.isArray(columns)) return state;
+
+      const { project, projects } = ensureProject(state.projects, projectPath);
+      project.columns = columns;
+
+      return { projects };
+    }
+
     default:
       return state;
   }
@@ -736,6 +731,7 @@ const SSE_TO_ACTION: Partial<Record<SSEEventType, BoardAction["type"]>> = {
   "project:disconnected": "PROJECT_DISCONNECTED",
   "agent:active": "AGENT_ACTIVE",
   "agent:idle": "AGENT_IDLE",
+  "columns:update": "COLUMNS_UPDATE",
 };
 
 // ============================================================

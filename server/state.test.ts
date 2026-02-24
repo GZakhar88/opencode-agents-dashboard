@@ -206,7 +206,7 @@ describe("StateManager - bead:discovered", () => {
     const bead = pipeline.beads.get("bd-abc")!;
     expect(bead.id).toBe("bd-abc");
     expect(bead.title).toBe("Add auth");
-    expect(bead.stage).toBe("backlog");
+    expect(bead.stage).toBe("ready");
     expect(bead.bdStatus).toBe("open");
     expect(bead.priority).toBe(1);
   });
@@ -244,7 +244,7 @@ describe("StateManager - bead:discovered", () => {
     expect(pipeline.beads.get("bd-abc")!.title).toBe("Add auth");
   });
 
-  it("maps in_progress bead to orchestrator stage", () => {
+  it("maps in_progress bead to ready stage", () => {
     sm.processEvent("p1", "bead:discovered", {
       bead: {
         id: "bd-abc",
@@ -260,7 +260,7 @@ describe("StateManager - bead:discovered", () => {
 
     const project = sm.getState().projects.get("/path/project-a")!;
     const pipeline = project.pipelines.values().next().value!;
-    expect(pipeline.beads.get("bd-abc")!.stage).toBe("orchestrator");
+    expect(pipeline.beads.get("bd-abc")!.stage).toBe("ready");
   });
 
   it("maps closed bead to done stage", () => {
@@ -1196,7 +1196,7 @@ describe("StateManager - Full lifecycle integration", () => {
     });
 
     let bead = getBead(sm, "bd-abc");
-    expect(bead.stage).toBe("backlog");
+    expect(bead.stage).toBe("ready");
 
     // 2. Claimed by orchestrator
     sm.processEvent("p1", "bead:claimed", {
@@ -1324,8 +1324,8 @@ describe("StateManager - Full lifecycle integration", () => {
     sm.processEvent("p1", "bead:done", { beadId: "bd-1" });
 
     expect(pipeline.beads.get("bd-1")!.stage).toBe("done");
-    expect(pipeline.beads.get("bd-2")!.stage).toBe("backlog");
-    expect(pipeline.beads.get("bd-3")!.stage).toBe("backlog");
+    expect(pipeline.beads.get("bd-2")!.stage).toBe("ready");
+    expect(pipeline.beads.get("bd-3")!.stage).toBe("ready");
   });
 });
 

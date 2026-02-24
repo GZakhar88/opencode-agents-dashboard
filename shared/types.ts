@@ -11,16 +11,14 @@
 // Core Domain Types
 // ============================================================
 
-/** Pipeline stages as Kanban columns */
-export type Stage =
-  | "backlog"
-  | "orchestrator"
-  | "builder"
-  | "refactor"
-  | "reviewer"
-  | "committer"
-  | "done"
-  | "error";
+/**
+ * Pipeline stage — dynamic string matching column IDs.
+ *
+ * Well-known values:
+ * - Status columns: "ready", "done", "error"
+ * - Agent columns: agent name (e.g., "orchestrator", "pipeline-builder")
+ */
+export type Stage = string;
 
 /** Pipeline status */
 export type PipelineStatus = "active" | "idle" | "done";
@@ -28,14 +26,11 @@ export type PipelineStatus = "active" | "idle" | "done";
 /** Bead status from `bd list --json` */
 export type BdStatus = "open" | "in_progress" | "blocked" | "closed";
 
-/** Pipeline agent types detected by the plugin */
-export type AgentType =
-  | "orchestrator"
-  | "builder"
-  | "refactor"
-  | "reviewer"
-  | "committer"
-  | "designer";
+/**
+ * Agent type — dynamic string matching discovered agent names.
+ * No longer a fixed union; any agent name is valid.
+ */
+export type AgentType = string;
 
 // ============================================================
 // Raw Bead Record (from bd list --json)
@@ -139,6 +134,7 @@ export interface ProjectState {
   connected: boolean; // is the plugin alive?
   pipelines: Map<string, Pipeline>;
   lastBeadSnapshot: BeadRecord[];
+  columns: ColumnConfig[]; // dynamic column layout from agent discovery
 }
 
 // ============================================================
@@ -170,7 +166,8 @@ export type PluginEventType =
   | "agent:idle"
   | "beads:refreshed"
   | "pipeline:started"
-  | "pipeline:done";
+  | "pipeline:done"
+  | "columns:update";
 
 /** SSE event types sent from server to dashboard */
 export type SSEEventType =
@@ -199,13 +196,13 @@ export interface BeadDiscoveredPayload extends BaseEventPayload {
 export interface BeadClaimedPayload extends BaseEventPayload {
   beadId: string;
   bead: BeadRecord;
-  stage: "orchestrator";
+  stage: string; // agent name that claimed it (e.g., "orchestrator")
 }
 
 /** bead:stage — bead moving to a new pipeline stage */
 export interface BeadStagePayload extends BaseEventPayload {
   beadId: string;
-  stage: AgentType;
+  stage: string; // agent name (column ID)
   agentSessionId?: string;
 }
 
@@ -235,7 +232,7 @@ export interface BeadRemovedPayload extends BaseEventPayload {
 
 /** agent:active — child agent session created and mapped to pipeline stage */
 export interface AgentActivePayload extends BaseEventPayload {
-  agent: AgentType;
+  agent: string; // agent name
   sessionId: string;
   parentSessionId: string;
   beadId: string;
@@ -243,7 +240,7 @@ export interface AgentActivePayload extends BaseEventPayload {
 
 /** agent:idle — child agent session finished work */
 export interface AgentIdlePayload extends BaseEventPayload {
-  agent: AgentType;
+  agent: string; // agent name
   sessionId: string;
   beadId: string;
 }
@@ -265,6 +262,11 @@ export interface PipelineDonePayload extends BaseEventPayload {
   pipelineId: string;
 }
 
+/** columns:update — plugin sends column configuration for the project */
+export interface ColumnsUpdatePayload extends BaseEventPayload {
+  columns: ColumnConfig[];
+}
+
 /** Map of event type to its payload type */
 export interface PluginEventPayloadMap {
   "bead:discovered": BeadDiscoveredPayload;
@@ -279,6 +281,7 @@ export interface PluginEventPayloadMap {
   "beads:refreshed": BeadsRefreshedPayload;
   "pipeline:started": PipelineStartedPayload;
   "pipeline:done": PipelineDonePayload;
+  "columns:update": ColumnsUpdatePayload;
 }
 
 // ============================================================
@@ -349,6 +352,7 @@ export interface SSEStateFullPayload {
           ]
         >;
         lastBeadSnapshot: BeadRecord[];
+        columns: ColumnConfig[];
       },
     ]
   >;
@@ -382,8 +386,17 @@ export interface PriorityConfig {
   colorClass: string; // Tailwind class
 }
 
-/** Column configuration for the Kanban board */
+/**
+ * Column configuration for the Kanban board.
+ *
+ * Columns are either status bookends ("ready", "done", "error") or
+ * agent columns (one per discovered agent). The plugin generates this
+ * config from agent discovery and sends it to the server.
+ */
 export interface ColumnConfig {
-  id: Stage;
-  label: string;
+  id: string; // column ID = stage value (e.g., "ready", "pipeline-builder")
+  label: string; // display name (e.g., "Ready", "Builder")
+  type: "status" | "agent"; // bookend vs agent column
+  color: string; // hex color for accent border (e.g., "#8b5cf6")
+  order: number; // position in board (0-based)
 }

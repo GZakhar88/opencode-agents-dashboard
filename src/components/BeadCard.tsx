@@ -108,7 +108,7 @@ export function BeadCard({ bead }: BeadCardProps) {
 
         {/* Bottom row: elapsed time + error indicator */}
         <div className="flex items-center justify-between">
-          {bead.stage !== "backlog" && bead.stage !== "done" && (
+          {bead.stage !== "ready" && bead.stage !== "done" && (
             <ElapsedTime startTime={bead.stageStartedAt} />
           )}
           {isError && (

@@ -1,40 +1,53 @@
 /**
- * Board — Kanban board container with 8 stage columns.
+ * Board — Kanban board container with dynamic agent columns.
  *
- * Displays columns in order: backlog → orchestrator → builder → refactor →
- * reviewer → committer → error → done.
- * Filters beads by stage and passes them to each Column.
- * Horizontal scroll container for narrow screens.
- * Supports compact mode (1 card height) and expanded mode (full height).
+ * Columns are driven by ColumnConfig[] from the server (via agent discovery).
+ * Falls back to DEFAULT_COLUMNS (ready, done, error) when no config available.
+ *
+ * Layout: ready → [agent columns] → done → error
+ * Beads with unknown stages fall back to the "ready" column.
  *
  * Wrapped in LayoutGroup to provide a shared layout animation context,
  * enabling smooth card transitions between columns via Framer Motion layoutId.
  */
 
-import type { Pipeline, BeadState, Stage } from "@shared/types";
+import type { Pipeline, BeadState, ColumnConfig } from "@shared/types";
 import { LayoutGroup } from "framer-motion";
-import { COLUMNS } from "@/lib/constants";
+import { DEFAULT_COLUMNS } from "@/lib/constants";
 import { Column } from "@/components/Column";
 
 interface BoardProps {
   pipeline: Pipeline;
   isExpanded: boolean;
+  columns?: ColumnConfig[];
 }
 
-export function Board({ pipeline, isExpanded }: BoardProps) {
+export function Board({ pipeline, isExpanded, columns }: BoardProps) {
+  // Use provided columns or fall back to defaults
+  const columnConfig =
+    columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
+
+  // Sort columns by order
+  const sortedColumns = [...columnConfig].sort((a, b) => a.order - b.order);
+
+  // Collect all known column IDs for fallback routing
+  const knownColumnIds = new Set(sortedColumns.map((c) => c.id));
+
   // Group beads by stage
-  const beadsByStage = new Map<Stage, BeadState[]>();
-  for (const columnId of COLUMNS) {
-    beadsByStage.set(columnId, []);
+  const beadsByStage = new Map<string, BeadState[]>();
+  for (const col of sortedColumns) {
+    beadsByStage.set(col.id, []);
   }
 
   for (const bead of pipeline.beads.values()) {
-    const list = beadsByStage.get(bead.stage);
-    if (list) {
-      list.push(bead);
+    if (knownColumnIds.has(bead.stage)) {
+      beadsByStage.get(bead.stage)!.push(bead);
     } else {
-      // Fallback: put unknown stages in backlog
-      beadsByStage.get("backlog")!.push(bead);
+      // Fallback: put unknown stages in "ready" column
+      const readyBeads = beadsByStage.get("ready");
+      if (readyBeads) {
+        readyBeads.push(bead);
+      }
     }
   }
 
@@ -42,11 +55,13 @@ export function Board({ pipeline, isExpanded }: BoardProps) {
     <div className="overflow-x-auto pb-2 scrollbar-thin">
       <LayoutGroup id={pipeline.id}>
         <div className="flex gap-3">
-          {COLUMNS.map((columnId) => (
+          {sortedColumns.map((col) => (
             <Column
-              key={columnId}
-              columnId={columnId}
-              beads={beadsByStage.get(columnId) ?? []}
+              key={col.id}
+              columnId={col.id}
+              label={col.label}
+              color={col.color}
+              beads={beadsByStage.get(col.id) ?? []}
               isCompact={!isExpanded}
             />
           ))}

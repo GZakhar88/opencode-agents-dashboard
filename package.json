@@ -29,6 +29,7 @@
     "shared/",
     "dist/",
     "bin/",
+    "agents/",
     "LICENSE"
   ],
   "engines": {

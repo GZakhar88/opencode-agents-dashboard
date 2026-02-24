@@ -107,8 +107,11 @@ async function cmdStart(args: string[]): Promise<void> {
 
   console.log(`Starting dashboard server on port ${port}...`);
 
+  // Use Bun.which to find bun reliably (process.execPath may not always be bun)
+  const bunPath = Bun.which("bun") ?? process.execPath;
+
   try {
-    const proc = Bun.spawn([process.execPath, "run", SERVER_ENTRY], {
+    const proc = Bun.spawn([bunPath, "run", SERVER_ENTRY], {
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
       env: { ...process.env, DASHBOARD_PORT: String(port) },

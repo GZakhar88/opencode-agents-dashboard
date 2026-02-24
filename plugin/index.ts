@@ -544,11 +544,20 @@ async function checkServerHealth(): Promise<boolean> {
 }
 
 async function spawnServer(port: number): Promise<boolean> {
+  // Resolve the bun executable path. We cannot use process.execPath because
+  // when running inside OpenCode, that points to the OpenCode Go binary,
+  // not bun. Bun.which("bun") finds it on $PATH reliably.
+  const bunPath = Bun.which("bun");
+  if (!bunPath) {
+    logError("Could not find 'bun' on PATH — cannot start dashboard server");
+    return false;
+  }
+
   log(`Server not running, starting on port ${port}...`);
-  log(`Spawning: bun run ${SERVER_ENTRY}`);
+  log(`Spawning: ${bunPath} run ${SERVER_ENTRY}`);
 
   try {
-    const proc = Bun.spawn([process.execPath, "run", SERVER_ENTRY], {
+    const proc = Bun.spawn([bunPath, "run", SERVER_ENTRY], {
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
       env: { ...process.env, DASHBOARD_PORT: String(port) },

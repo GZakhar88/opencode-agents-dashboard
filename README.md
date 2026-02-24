@@ -110,54 +110,100 @@ Agent columns appear between Ready and Done, one per discovered agent. For examp
 ### Prerequisites
 
 - [Bun](https://bun.sh) >= 1.0
-- [Node.js](https://nodejs.org) >= 18 (for Vite dev server)
 - [OpenCode](https://opencode.ai) with plugin support
 - A project using [bd (beads)](https://github.com/anomalyco/beads) for issue tracking
 
-### Setup
+### Clone and Install
 
 ```bash
-git clone https://github.com/gaborzakhar/opencode-dashboard.git
-cd opencode-dashboard
+git clone https://github.com/GZakhar88/opencode-agents-dashboard.git
+cd opencode-agents-dashboard
 bun install
 ```
 
-### Running Locally
+### Running Locally (Frontend + Server only)
 
-Start the server and frontend dev server in separate terminals:
+This starts the dashboard UI and server **without** the OpenCode plugin. Useful for working on the frontend or server code. No OpenCode or bd needed.
 
 ```bash
-# Terminal 1: Start the Bun server
+# Terminal 1: Start the Bun API server (port 3333)
 bun run server
 
-# Terminal 2: Start the Vite dev server
+# Terminal 2: Start the Vite dev server with HMR (port 5173)
 bun run dev
 ```
 
-Open `http://localhost:5173` in your browser. The Vite dev server proxies `/api/*` to the Bun server at `localhost:3333`.
-
-### Testing Locally (before npm publish)
-
-To test the plugin with OpenCode before publishing to npm, symlink the project into OpenCode's plugin cache:
+Open `http://localhost:5173`. The Vite dev server proxies `/api/*` requests to the Bun server at `localhost:3333`. The board will show "No projects connected" until a plugin registers — you can test by sending events directly:
 
 ```bash
-# 1. Build the frontend
-bun run build
+# Register a fake plugin
+curl -X POST http://localhost:3333/api/plugin/register \
+  -H 'Content-Type: application/json' \
+  -d '{"projectPath": "/tmp/test", "projectName": "test-project"}'
+# Returns: {"pluginId": "some-uuid"}
 
-# 2. Symlink into OpenCode's plugin cache
-ln -sf "$(pwd)" ~/.cache/opencode/node_modules/opencode-dashboard
-
-# 3. Add to your OpenCode config
-# opencode.json
-{
-  "plugin": ["opencode-dashboard"]
-}
+# Push an event (use the pluginId from above)
+curl -X POST http://localhost:3333/api/plugin/event \
+  -H 'Content-Type: application/json' \
+  -d '{"pluginId": "PASTE_ID_HERE", "event": "bead:discovered", "data": {"bead": {"id": "test-1", "title": "Test bead", "status": "open", "priority": "medium"}}}'
 ```
 
-OpenCode will resolve `opencode-dashboard` from the symlinked local directory on next launch. To remove later:
+### Running Locally (Full end-to-end with OpenCode)
+
+This connects the plugin to a live OpenCode session so you can test the full pipeline: plugin hooks -> server -> dashboard.
+
+**Step 1: Symlink the plugin into your project**
+
+From the project directory where you run OpenCode (not this repo):
 
 ```bash
-rm ~/.cache/opencode/node_modules/opencode-dashboard
+# Create the plugins directory if it doesn't exist
+mkdir -p /path/to/your/project/.opencode/plugins
+
+# Symlink the plugin entry point
+ln -sf /path/to/opencode-agents-dashboard/plugin/index.ts \
+       /path/to/your/project/.opencode/plugins/dashboard.ts
+```
+
+OpenCode auto-loads all `.ts` files from `.opencode/plugins/` on startup. The symlink's relative imports resolve from the real file's location, so `../shared/types`, `../server/pid`, etc. all work.
+
+**Step 2: Install commands and agents**
+
+```bash
+# From this repo's directory
+bun run bin/cli.ts setup
+```
+
+Choose "project" to install into `/path/to/your/project/.opencode/`, or "global" for `~/.config/opencode/`. This copies the `/dashboard-start`, `/dashboard-stop`, `/dashboard-status` commands and agent definitions.
+
+**Step 3: Launch OpenCode and start the dashboard**
+
+```bash
+# In your project directory
+DASHBOARD_DEBUG=1 opencode
+```
+
+Then in the OpenCode TUI, type `/dashboard-start`. The plugin will spawn the Bun server and open the dashboard at `http://localhost:3333`.
+
+`DASHBOARD_DEBUG=1` enables verbose plugin logging to stderr — useful for seeing what the plugin is doing.
+
+**Step 4: (Optional) Run Vite dev server for frontend HMR**
+
+If you're working on the frontend and want hot-reload instead of the pre-built `dist/`:
+
+```bash
+# In this repo's directory
+bun run dev
+```
+
+Open `http://localhost:5173` instead of `:3333`. Vite proxies API calls to the running Bun server.
+
+**Cleanup**
+
+To disconnect the plugin from your project:
+
+```bash
+rm /path/to/your/project/.opencode/plugins/dashboard.ts
 ```
 
 ### Testing

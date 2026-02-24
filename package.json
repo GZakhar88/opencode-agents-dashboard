@@ -7,10 +7,10 @@
   "author": "Gabor Zakhar",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gaborzakhar/opencode-dashboard"
+    "url": "https://github.com/GZakhar88/opencode-agents-dashboard"
   },
-  "homepage": "https://github.com/gaborzakhar/opencode-dashboard#readme",
-  "bugs": "https://github.com/gaborzakhar/opencode-dashboard/issues",
+  "homepage": "https://github.com/GZakhar88/opencode-agents-dashboard#readme",
+  "bugs": "https://github.com/GZakhar88/opencode-agents-dashboard/issues",
   "keywords": [
     "opencode",
     "opencode-plugin",

@@ -282,7 +282,7 @@ describe("POST /api/plugin/event", () => {
 
     // The broadcast should have wrapped the array in { data: [...] }
     expect(capturedData).not.toBeNull();
-    expect(capturedData).toContain('"data":[1,2,3]');
+    expect(capturedData!).toContain('"data":[1,2,3]');
 
     reader.cancel();
   });
@@ -405,8 +405,8 @@ describe("DELETE /api/plugin/:id", () => {
     await handleRequest(req);
 
     expect(capturedData).not.toBeNull();
-    expect(capturedData).toContain("project:disconnected");
-    expect(capturedData).toContain(pluginId);
+    expect(capturedData!).toContain("project:disconnected");
+    expect(capturedData!).toContain(pluginId);
 
     reader.cancel();
   });

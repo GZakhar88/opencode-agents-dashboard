@@ -2,7 +2,7 @@
  * Dashboard Server - Entry Point
  *
  * Standalone Bun server that aggregates state from OpenCode plugins
- * and serves the dashboard API + SSE stream.
+ * and serves the dashboard API + SSE stream + pre-built frontend.
  *
  * Run: bun run server/index.ts
  * Port: 3333 (configurable via DASHBOARD_PORT env var)
@@ -14,6 +14,7 @@ import {
   stateManager,
   stopHealthMonitoring,
 } from "./routes";
+import { writePid, removePid } from "./pid";
 
 const PORT = Number(process.env.DASHBOARD_PORT) || 3333;
 
@@ -22,6 +23,9 @@ const server = Bun.serve({
   fetch: handleRequest,
   idleTimeout: 255, // seconds (max) — SSE connections are long-lived
 });
+
+// Write PID file so plugin tools and CLI can find this server
+writePid(process.pid, server.port ?? PORT);
 
 console.log(`[dashboard-server] Running on http://localhost:${server.port}`);
 console.log(`[dashboard-server] PID: ${process.pid}`);
@@ -41,6 +45,7 @@ function shutdown() {
   stateManager.persistNow(); // Flush state to disk before shutdown
   stopHealthMonitoring();
   closeAllSSEClients();
+  removePid(); // Clean up PID file
   server.stop();
   console.log(`[dashboard-server] Server stopped.`);
   process.exit(0);

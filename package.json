@@ -1,16 +1,54 @@
 {
   "name": "opencode-dashboard",
   "version": "0.1.0",
-  "private": true,
+  "description": "Real-time Kanban dashboard for OpenCode agent pipelines",
   "type": "module",
+  "license": "MIT",
+  "author": "Gabor Zakhar",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gaborzakhar/opencode-dashboard"
+  },
+  "homepage": "https://github.com/gaborzakhar/opencode-dashboard#readme",
+  "bugs": "https://github.com/gaborzakhar/opencode-dashboard/issues",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "dashboard",
+    "kanban",
+    "pipeline",
+    "agent"
+  ],
+  "main": "./plugin/index.ts",
+  "bin": {
+    "opencode-dashboard": "./bin/cli.ts"
+  },
+  "files": [
+    "plugin/",
+    "server/",
+    "shared/",
+    "dist/",
+    "bin/",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
+    "build:check": "tsc -b",
     "preview": "vite preview",
     "server": "bun run server/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun test && vite build"
   },
   "dependencies": {
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^11.15.0",
@@ -19,12 +57,11 @@
     "react-dom": "^19.0.0",
     "tailwind-merge": "^2.6.0"
   },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
   "devDependencies": {
-    "@radix-ui/react-collapsible": "^1.1.2",
-    "@radix-ui/react-scroll-area": "^1.2.2",
-    "@radix-ui/react-separator": "^1.1.1",
-    "@radix-ui/react-slot": "^1.1.1",
-    "@radix-ui/react-tooltip": "^1.1.6",
+    "@opencode-ai/plugin": "^1.2.10",
     "@types/bun": "^1.1.14",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

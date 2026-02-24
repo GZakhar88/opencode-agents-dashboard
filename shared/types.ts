@@ -67,6 +67,24 @@ export interface BeadRecord {
 }
 
 // ============================================================
+// Bead Diff (used in plugin for snapshot diffing)
+// ============================================================
+
+/**
+ * A single diff entry between two bead snapshots.
+ *
+ * - `discovered`: bead exists in `next` but not `prev` (new bead appeared)
+ * - `changed`: bead exists in both but status/fields differ
+ * - `removed`: bead exists in `prev` but not `next` (bead deleted)
+ * - `error`: bead transitioned to an error state (e.g., blocked)
+ */
+export type BeadDiff =
+  | { type: "discovered"; bead: BeadRecord }
+  | { type: "changed"; bead: BeadRecord; prevStatus: string }
+  | { type: "removed"; beadId: string }
+  | { type: "error"; bead: BeadRecord; error: string };
+
+// ============================================================
 // Bead State (server-enriched, used in dashboard)
 // ============================================================
 

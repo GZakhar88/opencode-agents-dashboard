@@ -13,79 +13,18 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import type {
+  BeadRecord,
+  BeadState,
+  Pipeline,
+  ProjectState,
+  DashboardState,
+  PipelineStatus,
+  Stage,
+} from "../shared/types";
 
-// --- Types ---
-
-/** Raw bead record from bd list --json (as sent by plugin) */
-export interface BeadRecord {
-  id: string;
-  title: string;
-  description: string;
-  status: string; // open, in_progress, blocked, closed
-  priority: number; // 0-4
-  issue_type: string;
-  created_at: string;
-  updated_at: string;
-  closed_at?: string;
-  close_reason?: string;
-  dependencies?: Array<{
-    type: string;
-    depends_on_id: string;
-  }>;
-  // Extra fields from bd list --json
-  dependency_count?: number;
-  dependent_count?: number;
-  comment_count?: number;
-}
-
-/** Bead state as tracked by the server (enriched with pipeline info) */
-export interface BeadState {
-  id: string;
-  title: string;
-  description: string;
-  priority: number;
-  issueType: string;
-  bdStatus: string; // open, in_progress, blocked, closed
-  stage:
-    | "backlog"
-    | "orchestrator"
-    | "builder"
-    | "refactor"
-    | "reviewer"
-    | "committer"
-    | "done"
-    | "error";
-  stageStartedAt: number;
-  claimedAt?: number;
-  completedAt?: number;
-  agentSessionId?: string;
-  error?: string;
-}
-
-/** A pipeline (one orchestrator session working through beads) */
-export interface Pipeline {
-  id: string; // orchestrator session ID
-  title: string;
-  status: "active" | "idle" | "done";
-  currentBeadId: string | null;
-  beads: Map<string, BeadState>;
-}
-
-/** State for a single connected project */
-export interface ProjectState {
-  projectPath: string;
-  projectName: string;
-  pluginId: string;
-  lastHeartbeat: number;
-  connected: boolean;
-  pipelines: Map<string, Pipeline>;
-  lastBeadSnapshot: BeadRecord[];
-}
-
-/** Top-level aggregated state */
-export interface DashboardState {
-  projects: Map<string, ProjectState>;
-}
+// Re-export types so existing consumers (routes.ts, tests) continue to work
+export type { BeadRecord, BeadState, Pipeline, ProjectState, DashboardState };
 
 // --- Serialization types (for JSON persistence) ---
 
@@ -94,7 +33,7 @@ interface SerializedBeadState extends Omit<BeadState, never> {}
 interface SerializedPipeline {
   id: string;
   title: string;
-  status: "active" | "idle" | "done";
+  status: PipelineStatus;
   currentBeadId: string | null;
   beads: [string, SerializedBeadState][];
 }

@@ -24,50 +24,7 @@
  */
 
 import type { Plugin } from "@opencode-ai/plugin";
-
-// ─── Bead state types ──────────────────────────────────────────
-
-/**
- * Raw bead record from `bd list --json`.
- * Matches the actual output format of the bd CLI.
- */
-interface BeadRecord {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  priority: number;
-  issue_type: string;
-  created_at: string;
-  updated_at: string;
-  closed_at?: string;
-  close_reason?: string;
-  dependencies?: Array<{
-    issue_id: string;
-    depends_on_id: string;
-    type: string;
-    created_at?: string;
-    created_by?: string;
-    metadata?: string;
-  }>;
-  dependency_count?: number;
-  dependent_count?: number;
-  comment_count?: number;
-}
-
-/**
- * A single diff entry between two bead snapshots.
- *
- * - `discovered`: bead exists in `next` but not `prev` (new bead appeared)
- * - `changed`: bead exists in both but status/fields differ
- * - `removed`: bead exists in `prev` but not `next` (bead deleted)
- * - `error`: bead transitioned to an error state (e.g., blocked)
- */
-type BeadDiff =
-  | { type: "discovered"; bead: BeadRecord }
-  | { type: "changed"; bead: BeadRecord; prevStatus: string }
-  | { type: "removed"; beadId: string }
-  | { type: "error"; bead: BeadRecord; error: string };
+import type { BeadRecord, BeadDiff } from "../shared/types";
 
 const LOG_PREFIX = "[dashboard-bridge]";
 
@@ -83,7 +40,7 @@ const logError = (...args: unknown[]) => { if (DEBUG) console.error(LOG_PREFIX, 
 const SERVER_URL = "http://localhost:3333";
 // Note: server/index.ts is created in Phase 3. Until then, auto-start will
 // fail gracefully and the plugin falls back to context-injection-only mode.
-const SERVER_PATH = "/Users/gaborzakhar/Dev/opencode-dashboard/server/index.ts";
+const SERVER_PATH = new URL("../server/index.ts", import.meta.url).pathname;
 const HEALTH_ENDPOINT = `${SERVER_URL}/api/health`;
 const REGISTER_ENDPOINT = `${SERVER_URL}/api/plugin/register`;
 const HEARTBEAT_ENDPOINT = `${SERVER_URL}/api/plugin/heartbeat`;

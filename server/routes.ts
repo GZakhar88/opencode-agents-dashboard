@@ -23,6 +23,28 @@ import {
   clientCount,
   reset as resetSSE,
 } from "./sse";
+import { join } from "path";
+
+// --- Static File Serving ---
+
+/**
+ * Directory containing the pre-built Vite frontend.
+ * In production (npm install), this is `../dist/` relative to server/.
+ */
+const DIST_DIR = join(import.meta.dir, "../dist");
+
+/** Content-type map for static file extensions */
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
 
 // --- State Management ---
 
@@ -427,6 +449,28 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (pathname === "/api/health" && method === "GET") {
     return handleHealth(origin);
+  }
+
+  // --- Static File Serving (pre-built frontend) ---
+
+  if (method === "GET" && !pathname.startsWith("/api/")) {
+    const filePath = join(DIST_DIR, pathname === "/" ? "index.html" : pathname);
+    const file = Bun.file(filePath);
+    if (await file.exists()) {
+      const ext = filePath.substring(filePath.lastIndexOf("."));
+      return new Response(file, {
+        headers: {
+          "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
+        },
+      });
+    }
+    // SPA fallback: serve index.html for client-side routing
+    const indexFile = Bun.file(join(DIST_DIR, "index.html"));
+    if (await indexFile.exists()) {
+      return new Response(indexFile, {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
   }
 
   // --- Not Found ---

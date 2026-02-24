@@ -43,8 +43,8 @@ export type ConnectionStatus = "connected" | "disconnected" | "reconnecting";
 /** Pipeline status types */
 export type PipelineStatus = "active" | "idle" | "done";
 
-/** Dashboard server URL */
-export const SERVER_URL = "http://localhost:3333";
+/** Dashboard server URL — empty for relative URLs (server serves the frontend in production) */
+export const SERVER_URL = "";
 
 /** SSE reconnect interval (ms) — matches server retry directive */
 export const SSE_RECONNECT_INTERVAL = 3000;

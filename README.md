@@ -1,10 +1,10 @@
 # OpenCode Dashboard
 
-A real-time browser-based Kanban board that visualizes multi-agent pipeline workflows in [OpenCode](https://opencode.ai). Watch beads (tasks) move through agent stages -- from backlog to done -- as AI agents work on them.
+A real-time browser-based Kanban board that visualizes agent activity in [OpenCode](https://opencode.ai). Watch beads (tasks) move through agent stages -- from ready to done -- as AI agents work on them. Columns are generated dynamically based on your configured agents.
 
 ## Installation
 
-Add the plugin to your OpenCode config:
+1. Add the plugin to your OpenCode config:
 
 ```json
 // opencode.json
@@ -15,14 +15,22 @@ Add the plugin to your OpenCode config:
 
 OpenCode will install the plugin automatically on next launch.
 
+2. Run the setup command to install slash commands and (optionally) agent definitions:
+
+```bash
+npx opencode-dashboard setup
+```
+
+This will prompt you to choose between global (`~/.config/opencode/`) or per-project (`.opencode/`) installation. It copies the `/dashboard-start`, `/dashboard-stop`, and `/dashboard-status` commands, plus the shipped agent definitions. Existing files are never overwritten.
+
 ## Usage
 
 ### Start the Dashboard
 
-In your OpenCode session, ask the agent:
+Use the slash command in OpenCode:
 
 ```
-start the dashboard
+/dashboard-start
 ```
 
 Or use the CLI directly:
@@ -36,7 +44,7 @@ The dashboard will be available at `http://localhost:3333`.
 ### Check Status
 
 ```
-what's the dashboard status?
+/dashboard-status
 ```
 
 Or via CLI:
@@ -48,7 +56,7 @@ npx opencode-dashboard status
 ### Stop the Dashboard
 
 ```
-stop the dashboard
+/dashboard-stop
 ```
 
 Or via CLI:
@@ -81,22 +89,21 @@ OpenCode Plugin (plugin/index.ts)
   React Dashboard (dist/)
 ```
 
-1. **Plugin** -- An OpenCode plugin that hooks into agent lifecycle events, tracks bead state via `bd list --json`, and pushes structured events to the server. Registers custom tools (`dashboard_start`, `dashboard_stop`, `dashboard_status`, `dashboard_open`) for controlling the dashboard from within OpenCode.
+1. **Plugin** -- An OpenCode plugin that hooks into agent lifecycle events, discovers configured agents, tracks bead state via `bd list --json`, and pushes structured events to the server. Registers custom tools (`dashboard_start`, `dashboard_stop`, `dashboard_status`, `dashboard_open`) for controlling the dashboard from within OpenCode.
 2. **Server** -- A Bun HTTP server that aggregates state from connected plugins, persists it to disk, serves the dashboard frontend, and broadcasts updates to browser clients via Server-Sent Events (SSE).
-3. **Dashboard** -- A React SPA that renders an 8-column Kanban board with real-time updates, animated card transitions, and connection resilience.
+3. **Dashboard** -- A React SPA that renders a dynamic Kanban board with real-time updates, animated card transitions, and connection resilience.
 
 ### Kanban Columns
 
+Columns are generated dynamically based on your configured agents. Three fixed columns are always present:
+
 | Column | Description |
 |--------|-------------|
-| Backlog | Open beads not yet claimed |
-| Orchestrator | Bead claimed, orchestrator planning |
-| Builder | `pipeline-builder` agent implementing |
-| Refactor | `pipeline-refactor` agent improving code |
-| Reviewer | `pipeline-reviewer` agent reviewing |
-| Committer | `pipeline-committer` agent committing |
+| Ready | Open beads not yet claimed by an agent |
 | Done | Bead closed successfully |
 | Error | Bead blocked, failed, or abandoned |
+
+Agent columns appear between Ready and Done, one per discovered agent. For example, if you have `orchestrator`, `pipeline-builder`, `pipeline-reviewer`, and `pipeline-committer` agents configured, the board will show columns for each of them. Column colors are pulled from the agent's frontmatter `color` field when available.
 
 ## Development
 
@@ -129,10 +136,28 @@ bun run dev
 
 Open `http://localhost:5173` in your browser. The Vite dev server proxies `/api/*` to the Bun server at `localhost:3333`.
 
-For local plugin development, copy the plugin to your OpenCode plugins directory:
+### Testing Locally (before npm publish)
+
+To test the plugin with OpenCode before publishing to npm, symlink the project into OpenCode's plugin cache:
 
 ```bash
-cp plugins/dashboard-bridge.ts ~/.config/opencode/plugins/
+# 1. Build the frontend
+bun run build
+
+# 2. Symlink into OpenCode's plugin cache
+ln -sf "$(pwd)" ~/.cache/opencode/node_modules/opencode-dashboard
+
+# 3. Add to your OpenCode config
+# opencode.json
+{
+  "plugin": ["opencode-dashboard"]
+}
+```
+
+OpenCode will resolve `opencode-dashboard` from the symlinked local directory on next launch. To remove later:
+
+```bash
+rm ~/.cache/opencode/node_modules/opencode-dashboard
 ```
 
 ### Testing
@@ -169,6 +194,16 @@ bun run build:check  # Run TypeScript type checking
 
 ```
 opencode-dashboard/
+├── agents/                     # Shipped agent definitions (optional install)
+│   ├── orchestrator.md
+│   ├── pipeline-builder.md
+│   ├── pipeline-refactor.md
+│   ├── pipeline-reviewer.md
+│   └── pipeline-committer.md
+├── commands/                   # Slash commands (installed via setup)
+│   ├── dashboard-start.md
+│   ├── dashboard-stop.md
+│   └── dashboard-status.md
 ├── plugin/
 │   └── index.ts                # Main plugin entry (npm distribution)
 ├── server/
@@ -227,7 +262,7 @@ opencode-dashboard/
 ### Dashboard shows "No projects connected"
 
 - Verify OpenCode is running with the plugin installed.
-- Check that the plugin detected the orchestrator. Enable debug logging: `DASHBOARD_DEBUG=1 opencode`.
+- Check that agents are configured (in `opencode.json`, `.opencode/agents/`, or `~/.config/opencode/agents/`). Enable debug logging: `DASHBOARD_DEBUG=1 opencode`.
 - Confirm the server is reachable: `curl http://localhost:3333/api/health`.
 
 ### Beads not showing on the board

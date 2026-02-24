@@ -22,7 +22,7 @@ import { tool } from "@opencode-ai/plugin";
 import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
 import { isServerRunning, readPid, writePid, removePid } from "../server/pid";
 import { join, resolve } from "path";
-import { readdir, readFile, copyFile, mkdir } from "fs/promises";
+import { readdir, readFile, copyFile, mkdir, stat } from "fs/promises";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -487,20 +487,22 @@ function formatAgentLabel(name: string): string {
 }
 
 /**
- * Check if the shipped agent files are installed in a target directory.
+ * Check if specific files are installed in a target directory.
  */
-async function checkAgentsInstalled(targetDir: string): Promise<boolean> {
-  const requiredAgents = ["orchestrator.md", "pipeline-builder.md"];
+async function checkAgentsInstalled(
+  targetDir: string,
+  requiredFiles: string[] = ["orchestrator.md", "pipeline-builder.md"],
+): Promise<boolean> {
   try {
     const entries = await readdir(targetDir);
-    return requiredAgents.every((f) => entries.includes(f));
+    return requiredFiles.every((f) => entries.includes(f));
   } catch {
     return false;
   }
 }
 
 /**
- * Copy shipped agent files to a target directory.
+ * Copy shipped agent files to a target directory. Skips files that already exist.
  */
 async function installAgents(targetDir: string): Promise<string[]> {
   const shippedDir = join(import.meta.dir, "../agents");
@@ -510,7 +512,16 @@ async function installAgents(targetDir: string): Promise<string[]> {
     const entries = await readdir(shippedDir);
     for (const entry of entries) {
       if (!entry.endsWith(".md")) continue;
-      await copyFile(join(shippedDir, entry), join(targetDir, entry));
+      const destPath = join(targetDir, entry);
+      // Skip if file already exists (don't overwrite user customizations)
+      try {
+        await stat(destPath);
+        log(`Agent file already exists, skipping: ${destPath}`);
+        continue;
+      } catch {
+        // File doesn't exist — proceed with copy
+      }
+      await copyFile(join(shippedDir, entry), destPath);
       installed.push(entry);
     }
   } catch (err) {
@@ -888,7 +899,7 @@ async function startupSequence(
 ): Promise<string> {
   serverPort = port;
 
-  // Discover agents first (needed for column config and pipeline guidance decision)
+  // Discover agents (needed for column config and pipeline guidance decision)
   discoveredAgents = await discoverAllAgents(pPath);
   hasPipelineAgents = discoveredAgents.some((a) => a.name in PIPELINE_AGENT_ORDER);
   log(
@@ -1051,7 +1062,7 @@ async function getServerStatus(): Promise<string> {
 
 export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
   const projectName = directory.split("/").pop() || "unknown";
-  log(`Plugin loaded for ${projectName} (dormant — waiting for dashboard_start or orchestrator)`);
+  log(`Plugin loaded for ${projectName} (dormant — waiting for /dashboard-start)`);
   log(`Directory: ${directory}`);
 
   projectPath = directory;
@@ -1069,6 +1080,29 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       })
       .catch(() => {});
   };
+
+  // Check if setup has been run (look for commands in either location)
+  const projectCommandsDir = join(directory, ".opencode", "commands");
+  const globalCommandsDir = join(
+    process.env.HOME ?? process.env.USERPROFILE ?? "",
+    ".config",
+    "opencode",
+    "commands",
+  );
+  const hasProjectCommands = await checkAgentsInstalled(projectCommandsDir, [
+    "dashboard-start.md",
+  ]);
+  const hasGlobalCommands = await checkAgentsInstalled(globalCommandsDir, [
+    "dashboard-start.md",
+  ]);
+  if (!hasProjectCommands && !hasGlobalCommands) {
+    toast(
+      "Run: npx opencode-dashboard setup",
+      "warning",
+      "Dashboard setup required",
+    );
+    log("Setup not detected — commands not installed in either location");
+  }
 
   return {
     // ─── Custom Tools (LLM-callable) ──────────────────────────
@@ -1200,25 +1234,6 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       // Track current agent for bead:claimed stage tracking
       if (agent) {
         currentAgentName = agent;
-      }
-
-      // Auto-activate on first primary agent session if dormant
-      if (!activated && !activating) {
-        log(`Primary session detected (agent: ${agent ?? "default"}) — activating plugin`);
-        activating = true;
-        try {
-          await startupSequence(
-            directory,
-            projectName,
-            $,
-            Number(process.env.DASHBOARD_PORT) || DEFAULT_PORT,
-          );
-          activated = true;
-        } catch (err) {
-          logError(`Activation failed:`, err);
-        } finally {
-          activating = false;
-        }
       }
 
       if (injectedSessions.has(sessionID)) return;

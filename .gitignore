@@ -36,3 +36,6 @@ DISTRIBUTION_PLAN.md
 
 # PID file (runtime)
 opencode-dashboard.pid
+
+# Self-referencing symlink (local testing artifact)
+opencode-dashboard

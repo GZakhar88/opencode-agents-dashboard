@@ -1,0 +1,34 @@
+# Runtime state (contains local filesystem paths)
+server/.dashboard-state.json
+server/.test-state.json
+
+# Test files
+**/*.test.ts
+
+# Development-only files
+plugins/
+src/
+.beads/
+.opencode/
+
+# Build tooling
+vite.config.ts
+tsconfig.json
+tsconfig.app.json
+tsconfig.node.json
+postcss.config.js
+tailwind.config.js
+index.html
+
+# Planning docs
+ARCHITECTURE.md
+DASHBOARD_PLAN.md
+DECOUPLING_PLAN.md
+DISTRIBUTION_PLAN.md
+AGENTS.md
+
+# OS
+.DS_Store
+
+# PID file (runtime)
+opencode-dashboard.pid

@@ -136,6 +136,47 @@ describe("StateManager - Registration", () => {
     expect(sm.deregisterPlugin("nonexistent")).toBeNull();
   });
 
+  it("initializes activeAgents Set on plugin registration", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    const agents = sm.getActiveAgents("/path/project-a");
+    expect(agents).toBeDefined();
+    expect(agents.size).toBe(0);
+  });
+
+  it("deregistering a plugin clears activeAgents", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    // Discover a bead so agent:active has something to bind to
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-abc",
+        title: "Test",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    // Make agents active
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "s1",
+      agent: "builder",
+    });
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "s2",
+      agent: "reviewer",
+    });
+
+    expect(sm.getActiveAgents("/path/project-a").size).toBe(2);
+
+    sm.deregisterPlugin("p1");
+
+    expect(sm.getActiveAgents("/path/project-a").size).toBe(0);
+  });
+
   it("updates heartbeat for a registered plugin", () => {
     sm.registerPlugin("p1", "/path/project-a", "project-a");
     const before = sm.getState().projects.get("/path/project-a")!.lastHeartbeat;
@@ -804,6 +845,73 @@ describe("StateManager - agent:active / agent:idle", () => {
     expect(pipeline.beads.get("bd-abc")!.agentSessionId).toBe(
       "child-session-1"
     );
+  });
+
+  it("adds agent to activeAgents Set on agent:active", () => {
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "child-session-1",
+      agent: "builder",
+    });
+
+    const agents = sm.getActiveAgents("/path/project-a");
+    expect(agents.has("builder")).toBe(true);
+    expect(agents.size).toBe(1);
+  });
+
+  it("removes agent from activeAgents Set on agent:idle", () => {
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "child-session-1",
+      agent: "builder",
+    });
+    sm.processEvent("p1", "agent:idle", {
+      beadId: "bd-abc",
+      sessionId: "child-session-1",
+      agent: "builder",
+    });
+
+    const agents = sm.getActiveAgents("/path/project-a");
+    expect(agents.has("builder")).toBe(false);
+    expect(agents.size).toBe(0);
+  });
+
+  it("tracks multiple active agents simultaneously", () => {
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "session-1",
+      agent: "builder",
+    });
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "session-2",
+      agent: "reviewer",
+    });
+
+    const agents = sm.getActiveAgents("/path/project-a");
+    expect(agents.has("builder")).toBe(true);
+    expect(agents.has("reviewer")).toBe(true);
+    expect(agents.size).toBe(2);
+  });
+
+  it("serializes activeAgents as string[] in toJSON", () => {
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "session-1",
+      agent: "builder",
+    });
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-abc",
+      sessionId: "session-2",
+      agent: "reviewer",
+    });
+
+    const json = sm.toJSON();
+    const project = json.projects[0] as any;
+    expect(Array.isArray(project.activeAgents)).toBe(true);
+    expect(project.activeAgents).toContain("builder");
+    expect(project.activeAgents).toContain("reviewer");
+    expect(project.activeAgents.length).toBe(2);
   });
 });
 

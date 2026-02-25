@@ -64,6 +64,13 @@ export class StateManager {
   private persistDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private persistDebounceMs: number;
 
+  /**
+   * In-memory active agent tracking per project.
+   * Keyed by projectPath. The Set contains agent names that are currently active.
+   * Serialized as string[] on ProjectState.activeAgents for JSON output.
+   */
+  private activeAgents: Map<string, Set<string>> = new Map();
+
   /** Listeners called after every state mutation (for SSE broadcasting) */
   private listeners: Array<(event: string, data: unknown) => void> = [];
 
@@ -120,6 +127,9 @@ export class StateManager {
         pipelines,
         lastBeadSnapshot: project.lastBeadSnapshot,
         columns: project.columns,
+        activeAgents: Array.from(
+          this.activeAgents.get(project.projectPath) || []
+        ),
       });
     }
     return { projects };
@@ -153,6 +163,10 @@ export class StateManager {
       };
       this.state.projects.set(projectPath, project);
     }
+    // Ensure activeAgents Set exists for this project
+    if (!this.activeAgents.has(projectPath)) {
+      this.activeAgents.set(projectPath, new Set());
+    }
     this.schedulePersist();
   }
 
@@ -161,6 +175,11 @@ export class StateManager {
     for (const [, project] of this.state.projects) {
       if (project.pluginId === pluginId) {
         project.connected = false;
+        // Clear active agents for this project
+        const agents = this.activeAgents.get(project.projectPath);
+        if (agents) {
+          agents.clear();
+        }
         // No active session — mark active pipelines as idle
         for (const [, pipeline] of project.pipelines) {
           if (pipeline.status === "active") {
@@ -193,6 +212,16 @@ export class StateManager {
       }
     }
     return null;
+  }
+
+  /** Get the active agents Set for a project (by projectPath) */
+  getActiveAgents(projectPath: string): Set<string> {
+    let agents = this.activeAgents.get(projectPath);
+    if (!agents) {
+      agents = new Set();
+      this.activeAgents.set(projectPath, agents);
+    }
+    return agents;
   }
 
   // --- Event Processing ---
@@ -604,6 +633,7 @@ export class StateManager {
   ): { event: string; data: Record<string, unknown> } {
     const beadId = data.beadId as string;
     const sessionId = data.sessionId as string;
+    const agentName = data.agent as string;
     const pipeline = this.getOrCreateDefaultPipeline(project);
 
     if (beadId && sessionId) {
@@ -611,6 +641,16 @@ export class StateManager {
       if (beadState) {
         beadState.agentSessionId = sessionId;
       }
+    }
+
+    // Track active agent
+    if (agentName) {
+      let agents = this.activeAgents.get(project.projectPath);
+      if (!agents) {
+        agents = new Set();
+        this.activeAgents.set(project.projectPath, agents);
+      }
+      agents.add(agentName);
     }
 
     return {
@@ -629,12 +669,21 @@ export class StateManager {
   ): { event: string; data: Record<string, unknown> } {
     const beadId = data.beadId as string;
     const sessionId = data.sessionId as string;
+    const agentName = data.agent as string;
     const pipeline = this.getOrCreateDefaultPipeline(project);
 
     if (beadId) {
       const beadState = pipeline.beads.get(beadId);
       if (beadState && beadState.agentSessionId === sessionId) {
         beadState.agentSessionId = undefined;
+      }
+    }
+
+    // Remove agent from active set
+    if (agentName) {
+      const agents = this.activeAgents.get(project.projectPath);
+      if (agents) {
+        agents.delete(agentName);
       }
     }
 
@@ -827,6 +876,8 @@ export class StateManager {
       // Mark all projects as disconnected on load (plugins will re-register)
       for (const [, project] of this.state.projects) {
         project.connected = false;
+        // Initialize empty activeAgents Set for each loaded project
+        this.activeAgents.set(project.projectPath, new Set());
         // No session running after restart — mark active pipelines as idle
         for (const [, pipeline] of project.pipelines) {
           if (pipeline.status === "active") {
@@ -928,6 +979,7 @@ export class StateManager {
   /** Reset all state (for testing) */
   clear(): void {
     this.state = { projects: new Map() };
+    this.activeAgents.clear();
     if (this.persistDebounceTimer) {
       clearTimeout(this.persistDebounceTimer);
       this.persistDebounceTimer = null;

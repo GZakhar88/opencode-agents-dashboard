@@ -2546,3 +2546,347 @@ describe("StateManager - toJSON includes visibleColumns", () => {
     expect(ids1).toEqual(ids2);
   });
 });
+
+describe("StateManager - handleColumnsUpdate merge logic", () => {
+  let sm: StateManager;
+
+  beforeEach(() => {
+    cleanup();
+    sm = createManager();
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+  });
+
+  afterEach(() => {
+    sm.destroy();
+    cleanup();
+  });
+
+  it("plugin reconnect preserves dynamic columns not in new set", () => {
+    // Initial columns from plugin
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create a dynamic column during session (e.g., from bead:stage)
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-1",
+      stage: "orchestrator",
+    });
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-1",
+      stage: "pipeline-builder",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    expect(project.columns.find((c) => c.id === "pipeline-builder")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "pipeline-builder")!.source).toBe("dynamic");
+
+    // Plugin reconnects and sends fresh columns (without pipeline-builder)
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Dynamic column should be preserved
+    const col = project.columns.find((c) => c.id === "pipeline-builder");
+    expect(col).toBeDefined();
+    expect(col!.source).toBe("dynamic");
+    expect(col!.group).toBe("pipeline");
+  });
+
+  it("plugin columns take precedence over dynamic columns with same ID", () => {
+    // Create a dynamic column
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 2 },
+      ],
+    });
+
+    // Dynamic column created
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "my-agent" });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    expect(project.columns.find((c) => c.id === "my-agent")!.source).toBe("dynamic");
+
+    // Plugin now includes my-agent as a discovered column
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "my-agent", label: "My Agent (Discovered)", type: "agent", color: "#ff0000", order: 1, group: "standalone", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Plugin version should win
+    const col = project.columns.find((c) => c.id === "my-agent");
+    expect(col).toBeDefined();
+    expect(col!.source).toBe("discovered");
+    expect(col!.label).toBe("My Agent (Discovered)");
+    expect(col!.color).toBe("#ff0000");
+
+    // Should not have duplicate my-agent
+    const myAgentCols = project.columns.filter((c) => c.id === "my-agent");
+    expect(myAgentCols.length).toBe(1);
+  });
+
+  it("multiple dynamic columns are preserved on plugin reconnect", () => {
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create multiple dynamic columns
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "orchestrator" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-reviewer" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "custom-agent" });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    expect(project.columns.filter((c) => c.source === "dynamic").length).toBe(3);
+
+    // Plugin reconnects with same initial columns
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // All 3 dynamic columns should be preserved
+    const dynamicCols = project.columns.filter((c) => c.source === "dynamic");
+    expect(dynamicCols.length).toBe(3);
+    expect(dynamicCols.map((c) => c.id).sort()).toEqual(["custom-agent", "pipeline-builder", "pipeline-reviewer"]);
+  });
+
+  it("order is renormalized after merge", () => {
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create dynamic columns
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "orchestrator" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "custom-agent" });
+
+    // Plugin reconnects
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const orders = project.columns.map((c) => c.order).sort((a, b) => a - b);
+
+    // Orders should be sequential: 0, 1, 2, ..., n-1
+    for (let i = 0; i < orders.length; i++) {
+      expect(orders[i]).toBe(i);
+    }
+
+    // Verify ordering: ready < pipeline < standalone < done < error
+    const sorted = [...project.columns].sort((a, b) => a.order - b.order);
+    const ids = sorted.map((c) => c.id);
+    expect(ids[0]).toBe("ready");
+    expect(ids[ids.length - 2]).toBe("done");
+    expect(ids[ids.length - 1]).toBe("error");
+  });
+
+  it("columns without source field are treated as non-dynamic (not preserved on merge)", () => {
+    // Initial setup: columns without source field (simulating old plugin/state)
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "old-agent", label: "Old Agent", type: "agent", color: "#8b5cf6", order: 1 },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Plugin reconnects without old-agent
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 2 },
+      ],
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    // old-agent should be gone (it wasn't dynamic)
+    expect(project.columns.find((c) => c.id === "old-agent")).toBeUndefined();
+  });
+
+  it("preserves group field from plugin columns", () => {
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const orchCol = project.columns.find((c) => c.id === "orchestrator");
+    expect(orchCol).toBeDefined();
+    expect(orchCol!.group).toBe("pipeline");
+    expect(orchCol!.source).toBe("discovered");
+  });
+});
+
+describe("StateManager - Serialization of group/source fields", () => {
+  afterEach(cleanup);
+
+  it("persists and restores group and source fields on columns", () => {
+    const sm1 = createManager();
+    sm1.registerPlugin("p1", "/path/project-a", "project-a");
+    sm1.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create a dynamic column
+    sm1.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm1.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "orchestrator" });
+    sm1.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+
+    sm1.persistNow();
+    sm1.destroy();
+
+    // Load into new manager
+    const sm2 = createManager();
+    const project = sm2.getState().projects.get("/path/project-a")!;
+
+    // discovered column should retain group/source
+    const orchCol = project.columns.find((c) => c.id === "orchestrator");
+    expect(orchCol).toBeDefined();
+    expect(orchCol!.group).toBe("pipeline");
+    expect(orchCol!.source).toBe("discovered");
+
+    // dynamic column should retain group/source
+    const builderCol = project.columns.find((c) => c.id === "pipeline-builder");
+    expect(builderCol).toBeDefined();
+    expect(builderCol!.group).toBe("pipeline");
+    expect(builderCol!.source).toBe("dynamic");
+
+    sm2.destroy();
+  });
+
+  it("backward compatible: loads old state without group/source fields", () => {
+    // Write a state file with columns that DON'T have group/source
+    const { writeFileSync } = require("fs");
+    const oldState = {
+      version: 1,
+      savedAt: Date.now(),
+      projects: [
+        [
+          "/path/project-a",
+          {
+            projectPath: "/path/project-a",
+            projectName: "project-a",
+            pluginId: "p1",
+            lastHeartbeat: Date.now(),
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1 },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+              { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+            ],
+          },
+        ],
+      ],
+    };
+    writeFileSync(TEST_PERSIST_PATH, JSON.stringify(oldState));
+
+    // Should load without crashing
+    const sm = createManager();
+    const project = sm.getState().projects.get("/path/project-a")!;
+
+    expect(project.columns.length).toBe(4);
+    // group and source should be undefined (backward compatible)
+    const orchCol = project.columns.find((c) => c.id === "orchestrator");
+    expect(orchCol).toBeDefined();
+    expect(orchCol!.group).toBeUndefined();
+    expect(orchCol!.source).toBeUndefined();
+
+    sm.destroy();
+  });
+
+  it("server restart clears activeAgents", () => {
+    const sm1 = createManager();
+    sm1.registerPlugin("p1", "/path/project-a", "project-a");
+    sm1.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm1.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "builder",
+    });
+    sm1.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s2",
+      agent: "reviewer",
+    });
+
+    expect(sm1.getActiveAgents("/path/project-a").size).toBe(2);
+
+    sm1.persistNow();
+    sm1.destroy();
+
+    // Load into new manager (simulates server restart)
+    const sm2 = createManager();
+    // Active agents should be empty after restart
+    const agents = sm2.getActiveAgents("/path/project-a");
+    expect(agents.size).toBe(0);
+
+    sm2.destroy();
+  });
+});

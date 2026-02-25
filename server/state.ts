@@ -1182,7 +1182,29 @@ export class StateManager {
     const columns = data.columns as ColumnConfig[] | undefined;
 
     if (Array.isArray(columns)) {
-      project.columns = columns;
+      // Merge strategy: keep dynamic columns that aren't in the new set,
+      // replace/update discovered columns with the new ones from the plugin.
+      // This prevents losing dynamic columns when a plugin reconnects.
+      const existingDynamic = project.columns.filter(
+        (col) => col.source === "dynamic"
+      );
+
+      // Build a set of IDs from the incoming plugin columns
+      const incomingIds = new Set(columns.map((c) => c.id));
+
+      // Keep dynamic columns whose IDs are NOT in the incoming set
+      // (if the plugin now includes a column that was previously dynamic,
+      //  the plugin's version takes precedence)
+      const dynamicToKeep = existingDynamic.filter(
+        (col) => !incomingIds.has(col.id)
+      );
+
+      // Merge: plugin columns + retained dynamic columns
+      project.columns = [...columns, ...dynamicToKeep];
+
+      // Re-normalize order values to account for merged columns
+      renormalizeColumnOrders(project);
+
       this.schedulePersist();
     }
 

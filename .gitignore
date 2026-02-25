@@ -33,6 +33,7 @@ ARCHITECTURE.md
 DASHBOARD_PLAN.md
 DECOUPLING_PLAN.md
 DISTRIBUTION_PLAN.md
+plan_files/
 
 # PID file (runtime)
 opencode-dashboard.pid

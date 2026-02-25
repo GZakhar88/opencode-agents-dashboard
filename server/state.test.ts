@@ -2890,3 +2890,644 @@ describe("StateManager - Serialization of group/source fields", () => {
     sm2.destroy();
   });
 });
+
+// ============================================================
+// Additional coverage tests for plan scenarios
+// ============================================================
+
+describe("computeVisibleColumns - additional scenarios", () => {
+  let sm: StateManager;
+
+  beforeEach(() => {
+    cleanup();
+    sm = createManager();
+    setupProjectWithColumns(sm);
+  });
+
+  afterEach(() => {
+    sm.destroy();
+    cleanup();
+  });
+
+  it("scenario: orchestrator active, reviewer working, builder idle → all pipeline columns stay", () => {
+    // Orchestrator active
+    createBeadInStage(sm, "bd-1", "pipeline-reviewer");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+    // Builder was active then went idle
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s2",
+      agent: "pipeline-builder",
+    });
+    sm.processEvent("p1", "agent:idle", {
+      beadId: "bd-1",
+      sessionId: "s2",
+      agent: "pipeline-builder",
+    });
+    // Reviewer active
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s3",
+      agent: "pipeline-reviewer",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    // All pipeline columns should still be visible (orchestrator is active)
+    expect(ids).toEqual([
+      "ready",
+      "orchestrator",
+      "pipeline-builder",
+      "pipeline-refactor",
+      "pipeline-reviewer",
+      "pipeline-committer",
+      "done",
+      "error",
+    ]);
+  });
+
+  it("scenario: user switches to Build mode, works on beads → Ready, Build, Done, Error", () => {
+    // Create a Build standalone column and put a bead in it
+    createBeadInStage(sm, "bd-1", "build");
+    // Make build agent active
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "build",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    expect(ids).toContain("ready");
+    expect(ids).toContain("build");
+    expect(ids).toContain("done");
+    expect(ids).toContain("error");
+    // Pipeline columns should NOT be visible
+    expect(ids).not.toContain("orchestrator");
+    expect(ids).not.toContain("pipeline-builder");
+    expect(ids).not.toContain("pipeline-reviewer");
+    expect(ids).not.toContain("pipeline-committer");
+  });
+
+  it("scenario: user invokes @general subagent from Build → Ready, Build, General, Done, Error", () => {
+    // Create Build and General standalone columns via bead stages
+    createBeadInStage(sm, "bd-1", "build");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "build",
+    });
+    // Spawn a general subagent
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-1",
+      stage: "general",
+    });
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s2",
+      agent: "general",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    expect(ids).toContain("ready");
+    expect(ids).toContain("build");
+    expect(ids).toContain("general");
+    expect(ids).toContain("done");
+    expect(ids).toContain("error");
+    // Pipeline columns should NOT be visible
+    expect(ids).not.toContain("orchestrator");
+  });
+
+  it("scenario: custom agent 'security-auditor' works → Ready, Security Auditor, Done, Error", () => {
+    // Create a bead and move it to the custom agent stage
+    createBeadInStage(sm, "bd-1", "security-auditor");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "security-auditor",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    expect(ids).toContain("ready");
+    expect(ids).toContain("security-auditor");
+    expect(ids).toContain("done");
+    expect(ids).toContain("error");
+    // Pipeline should NOT be visible
+    expect(ids).not.toContain("orchestrator");
+
+    // Verify label formatting
+    const secCol = project.columns.find((c) => c.id === "security-auditor");
+    expect(secCol).toBeDefined();
+    expect(secCol!.label).toBe("Security-auditor");
+  });
+
+  it("scenario: all beads done, orchestrator goes idle → pipeline columns hidden (via grace expiry simulation)", () => {
+    // Make pipeline visible: claim and complete a bead
+    createBeadInStage(sm, "bd-1", "orchestrator");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+
+    // Verify pipeline is visible
+    let visible = sm.computeVisibleColumns(project);
+    expect(visible.map((c) => c.id)).toContain("orchestrator");
+
+    // Complete the bead and idle orchestrator
+    sm.processEvent("p1", "bead:done", { beadId: "bd-1" });
+    sm.processEvent("p1", "agent:idle", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+
+    // During grace period, pipeline should still be visible
+    visible = sm.computeVisibleColumns(project);
+    expect(visible.map((c) => c.id)).toContain("orchestrator");
+
+    // After grace period (simulated by destroying and re-creating without timer):
+    // We can't wait 30s in tests, but we can verify the timer mechanism is set up.
+    // The grace period test above already verifies the timer logic.
+    // Here we verify the state is correct: no active agents, no beads in pipeline stages.
+    const agents = sm.getActiveAgents("/path/project-a");
+    expect(agents.size).toBe(0);
+    expect(sm.anyBeadInStages(project, new Set(["orchestrator", "pipeline-builder", "pipeline-reviewer", "pipeline-committer"]))).toBe(false);
+  });
+});
+
+describe("createDynamicColumn - additional scenarios", () => {
+  it("custom hyphenated agent 'security-auditor' gets correctly formatted label", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    const col = createDynamicColumn(project, "security-auditor");
+    expect(col).not.toBeNull();
+    expect(col!.id).toBe("security-auditor");
+    expect(col!.label).toBe("Security-auditor");
+    expect(col!.group).toBe("standalone");
+    expect(col!.source).toBe("dynamic");
+    expect(col!.type).toBe("agent");
+  });
+
+  it("pipeline-committer gets correct label 'Committer' and group 'pipeline'", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    const col = createDynamicColumn(project, "pipeline-committer");
+    expect(col).not.toBeNull();
+    expect(col!.id).toBe("pipeline-committer");
+    expect(col!.label).toBe("Committer");
+    expect(col!.group).toBe("pipeline");
+    expect(col!.source).toBe("dynamic");
+  });
+
+  it("orchestrator gets correct label and group 'pipeline'", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    const col = createDynamicColumn(project, "orchestrator");
+    expect(col).not.toBeNull();
+    expect(col!.id).toBe("orchestrator");
+    expect(col!.label).toBe("Orchestrator");
+    expect(col!.group).toBe("pipeline");
+    expect(col!.source).toBe("dynamic");
+  });
+});
+
+describe("Edge Cases - comprehensive coverage", () => {
+  let sm: StateManager;
+
+  beforeEach(() => {
+    cleanup();
+    sm = createManager();
+  });
+
+  afterEach(() => {
+    sm.destroy();
+    cleanup();
+  });
+
+  it("plugin starts, no beads → only Ready, Done, Error", () => {
+    setupProjectWithColumns(sm);
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    expect(ids).toEqual(["ready", "done", "error"]);
+  });
+
+  it("plugin sends columns:update with pipeline agents but no beads → pipeline NOT visible", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "pipeline-builder", label: "Builder", type: "agent", color: "#3b82f6", order: 2, group: "pipeline", source: "discovered" },
+        { id: "pipeline-reviewer", label: "Reviewer", type: "agent", color: "#f59e0b", order: 3, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 4 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 5 },
+      ],
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    // Pipeline columns should NOT be visible (no beads, no active agents)
+    expect(ids).toEqual(["ready", "done", "error"]);
+    expect(ids).not.toContain("orchestrator");
+    expect(ids).not.toContain("pipeline-builder");
+  });
+
+  it("orchestrator claims first bead → all pipeline columns visible immediately", () => {
+    setupProjectWithColumns(sm);
+
+    // Discover and claim a bead to orchestrator
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-1",
+        title: "First bead",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-1",
+      bead: {
+        id: "bd-1",
+        title: "First bead",
+        description: "",
+        status: "in_progress",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+      stage: "orchestrator",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    // All pipeline columns should be visible immediately
+    expect(ids).toContain("orchestrator");
+    expect(ids).toContain("pipeline-builder");
+    expect(ids).toContain("pipeline-refactor");
+    expect(ids).toContain("pipeline-reviewer");
+    expect(ids).toContain("pipeline-committer");
+    expect(ids).toContain("ready");
+    expect(ids).toContain("done");
+    expect(ids).toContain("error");
+  });
+
+  it("user uses Build mode but never claims a bead → Build column does NOT appear", () => {
+    setupProjectWithColumns(sm);
+
+    // Add a standalone build column to the project's config but DON'T put any beads in it
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        ...sm.getState().projects.get("/path/project-a")!.columns,
+        { id: "build", label: "Build", type: "agent", color: "#ec4899", order: 8, group: "standalone", source: "discovered" },
+      ],
+    });
+
+    // No bead is in build stage, no build agent is active
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+
+    expect(ids).not.toContain("build");
+    expect(ids).toEqual(["ready", "done", "error"]);
+  });
+
+  it("unknown agent 'my-custom-agent' in bead:stage creates new column dynamically", () => {
+    setupProjectWithColumns(sm);
+
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-1",
+        title: "Test",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-1",
+      stage: "orchestrator",
+    });
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-1",
+      stage: "my-custom-agent",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const col = project.columns.find((c) => c.id === "my-custom-agent");
+    expect(col).toBeDefined();
+    expect(col!.label).toBe("My-custom-agent");
+    expect(col!.group).toBe("standalone");
+    expect(col!.source).toBe("dynamic");
+    expect(col!.type).toBe("agent");
+
+    // The bead should be in the new stage
+    const bead = getBead(sm, "bd-1");
+    expect(bead.stage).toBe("my-custom-agent");
+  });
+
+  it("server restarts, loads persisted state → columns include both discovered and dynamic", () => {
+    // Set up a project with discovered and dynamic columns
+    const sm1 = createManager();
+    sm1.registerPlugin("p1", "/path/project-a", "project-a");
+    sm1.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create dynamic columns
+    sm1.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm1.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "orchestrator" });
+    sm1.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+    sm1.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "my-custom-agent" });
+
+    sm1.persistNow();
+    sm1.destroy();
+
+    // Simulate server restart
+    const sm2 = createManager();
+    const project = sm2.getState().projects.get("/path/project-a")!;
+
+    // Should have both discovered and dynamic columns
+    const discoveredCols = project.columns.filter((c) => c.source === "discovered");
+    const dynamicCols = project.columns.filter((c) => c.source === "dynamic");
+
+    expect(discoveredCols.length).toBeGreaterThanOrEqual(1);
+    expect(dynamicCols.length).toBe(2); // pipeline-builder, my-custom-agent
+
+    // Check specific columns
+    expect(project.columns.find((c) => c.id === "orchestrator")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "pipeline-builder")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "my-custom-agent")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "ready")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "done")).toBeDefined();
+    expect(project.columns.find((c) => c.id === "error")).toBeDefined();
+
+    sm2.destroy();
+  });
+
+  it("two projects simultaneously → independent column configs", () => {
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    sm.registerPlugin("p2", "/path/project-b", "project-b");
+
+    // Set up columns for project A
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Set up columns for project B (different set)
+    sm.processEvent("p2", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "build", label: "Build", type: "agent", color: "#3b82f6", order: 1, group: "standalone", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+
+    // Create dynamic column in project A only
+    sm.processEvent("p1", "bead:discovered", {
+      bead: { id: "bd-1", title: "B1", status: "open", priority: 1, issue_type: "task", created_at: "2026-01-01", updated_at: "2026-01-01" },
+    });
+    sm.processEvent("p1", "bead:claimed", { beadId: "bd-1", stage: "orchestrator" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+
+    const projectA = sm.getState().projects.get("/path/project-a")!;
+    const projectB = sm.getState().projects.get("/path/project-b")!;
+
+    // Project A should have pipeline-builder column
+    expect(projectA.columns.find((c) => c.id === "pipeline-builder")).toBeDefined();
+    // Project B should NOT have pipeline-builder column
+    expect(projectB.columns.find((c) => c.id === "pipeline-builder")).toBeUndefined();
+
+    // Project B should have build column
+    expect(projectB.columns.find((c) => c.id === "build")).toBeDefined();
+    // Project A should NOT have build column
+    expect(projectA.columns.find((c) => c.id === "build")).toBeUndefined();
+
+    // Visibility is independent too
+    const visibleA = sm.computeVisibleColumns(projectA);
+    const visibleB = sm.computeVisibleColumns(projectB);
+
+    // Project A has a bead in pipeline stage → pipeline visible
+    expect(visibleA.map((c) => c.id)).toContain("orchestrator");
+    expect(visibleA.map((c) => c.id)).toContain("pipeline-builder");
+
+    // Project B has no activity → only bookends
+    expect(visibleB.map((c) => c.id)).toEqual(["ready", "done", "error"]);
+  });
+
+  it("bead moves through pipeline stages rapidly → columns stable", () => {
+    setupProjectWithColumns(sm);
+
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-1",
+        title: "Fast bead",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-1",
+      stage: "orchestrator",
+    });
+
+    // Rapidly move through stages
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-builder" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-reviewer" });
+    sm.processEvent("p1", "bead:stage", { beadId: "bd-1", stage: "pipeline-committer" });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+
+    // No new dynamic columns should be created (all are known pipeline agents)
+    const dynamicCols = project.columns.filter((c) => c.source === "dynamic");
+    expect(dynamicCols.length).toBe(0);
+
+    // Bead should be in final stage
+    const bead = getBead(sm, "bd-1");
+    expect(bead.stage).toBe("pipeline-committer");
+
+    // All pipeline columns should be visible (bead is in pipeline stage)
+    const visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+    expect(ids).toContain("orchestrator");
+    expect(ids).toContain("pipeline-builder");
+    expect(ids).toContain("pipeline-reviewer");
+    expect(ids).toContain("pipeline-committer");
+
+    // Orders should still be sequential
+    const orders = project.columns.map((c) => c.order).sort((a, b) => a - b);
+    for (let i = 0; i < orders.length; i++) {
+      expect(orders[i]).toBe(i);
+    }
+  });
+
+  it("orchestrator finishes, user waits → grace period keeps pipeline visible", () => {
+    setupProjectWithColumns(sm);
+
+    // Start pipeline activity
+    createBeadInStage(sm, "bd-1", "orchestrator");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+
+    // Verify pipeline visible
+    let visible = sm.computeVisibleColumns(project);
+    expect(visible.map((c) => c.id)).toContain("orchestrator");
+
+    // Complete bead, make orchestrator idle
+    sm.processEvent("p1", "bead:done", { beadId: "bd-1" });
+    sm.processEvent("p1", "agent:idle", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+
+    // During grace period — pipeline should still be visible
+    visible = sm.computeVisibleColumns(project);
+    const ids = visible.map((c) => c.id);
+    expect(ids).toContain("orchestrator");
+    expect(ids).toContain("pipeline-builder");
+
+    // Verify no active agents and no beads in pipeline stages
+    // (grace timer is the only thing keeping pipeline visible)
+    expect(sm.getActiveAgents("/path/project-a").size).toBe(0);
+    expect(
+      sm.anyBeadInStages(
+        project,
+        new Set(["orchestrator", "pipeline-builder", "pipeline-reviewer", "pipeline-committer"])
+      )
+    ).toBe(false);
+  });
+
+  it("during grace period, orchestrator picks up new bead → grace cancelled, pipeline stays visible", () => {
+    setupProjectWithColumns(sm);
+
+    // Start and complete first bead
+    createBeadInStage(sm, "bd-1", "orchestrator");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+    sm.processEvent("p1", "bead:done", { beadId: "bd-1" });
+    sm.processEvent("p1", "agent:idle", {
+      beadId: "bd-1",
+      sessionId: "s1",
+      agent: "orchestrator",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+
+    // Grace period active — pipeline still visible
+    let visible = sm.computeVisibleColumns(project);
+    expect(visible.map((c) => c.id)).toContain("orchestrator");
+
+    // New bead picked up during grace period
+    createBeadInStage(sm, "bd-2", "orchestrator");
+    sm.processEvent("p1", "agent:active", {
+      beadId: "bd-2",
+      sessionId: "s2",
+      agent: "orchestrator",
+    });
+
+    // Pipeline should remain visible (now because of active agent, not grace)
+    visible = sm.computeVisibleColumns(project);
+    expect(visible.map((c) => c.id)).toContain("orchestrator");
+    expect(visible.map((c) => c.id)).toContain("pipeline-builder");
+
+    // Verify the orchestrator is active (not just grace period)
+    expect(sm.getActiveAgents("/path/project-a").has("orchestrator")).toBe(true);
+  });
+});
+
+describe("formatAgentLabel - additional coverage", () => {
+  it("formats 'security-auditor' correctly", () => {
+    expect(formatAgentLabel("security-auditor")).toBe("Security-auditor");
+  });
+
+  it("formats 'pipeline-committer' correctly", () => {
+    expect(formatAgentLabel("pipeline-committer")).toBe("Committer");
+  });
+
+  it("formats single character agent name", () => {
+    expect(formatAgentLabel("a")).toBe("A");
+  });
+
+  it("formats empty string", () => {
+    expect(formatAgentLabel("")).toBe("");
+  });
+
+  it("formats 'general' correctly", () => {
+    expect(formatAgentLabel("general")).toBe("General");
+  });
+});

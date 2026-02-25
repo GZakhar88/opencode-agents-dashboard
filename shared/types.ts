@@ -135,6 +135,7 @@ export interface ProjectState {
   pipelines: Map<string, Pipeline>;
   lastBeadSnapshot: BeadRecord[];
   columns: ColumnConfig[]; // dynamic column layout from agent discovery
+  activeAgents?: string[]; // currently active agent names (serialized form of Set<string>)
 }
 
 // ============================================================
@@ -399,4 +400,6 @@ export interface ColumnConfig {
   type: "status" | "agent"; // bookend vs agent column
   color: string; // hex color for accent border (e.g., "#8b5cf6")
   order: number; // position in board (0-based)
+  group?: "pipeline" | "standalone"; // visibility logic grouping for pipeline columns
+  source?: "discovered" | "dynamic"; // how the column was created (debugging/logging)
 }

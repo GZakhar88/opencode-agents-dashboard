@@ -686,6 +686,147 @@ describe("broadcast", () => {
   });
 });
 
+describe("columns:visibility SSE bridge", () => {
+  beforeEach(cleanup);
+
+  async function registerPlugin(): Promise<string> {
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    const res = await handleRequest(req);
+    const data = (await jsonBody(res)) as { pluginId: string };
+    return data.pluginId;
+  }
+
+  it("broadcasts columns:update via SSE when stateManager emits columns:visibility", async () => {
+    const pluginId = await registerPlugin();
+
+    // First, discover a bead so we have something to work with
+    await handleRequest(
+      makeRequest("POST", "/api/plugin/event", {
+        pluginId,
+        event: "bead:discovered",
+        data: {
+          bead: {
+            id: "bd-test",
+            title: "Test",
+            status: "open",
+            priority: 1,
+            issue_type: "task",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        },
+      })
+    );
+
+    // Set up columns including pipeline agents — this is needed because
+    // computeVisibleColumns iterates project.columns, so without columns
+    // the visibility set never changes and no event fires.
+    await handleRequest(
+      makeRequest("POST", "/api/plugin/event", {
+        pluginId,
+        event: "columns:update",
+        data: {
+          columns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+            { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+            { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+          ],
+        },
+      })
+    );
+
+    // Set up an SSE client to capture broadcasts AFTER initial columns:update
+    // so we only capture the columns:update triggered by agent:active
+    const received: string[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const originalEnqueue = controller.enqueue.bind(controller);
+        controller.enqueue = (chunk: Uint8Array) => {
+          const text = new TextDecoder().decode(chunk);
+          received.push(text);
+          originalEnqueue(chunk);
+        };
+        sseClients.add({ controller, connectedAt: Date.now() });
+      },
+    });
+    const reader = stream.getReader();
+
+    // Trigger agent:active with orchestrator — this should cause
+    // the stateManager to emit columns:visibility (since the orchestrator
+    // becoming active makes pipeline columns visible), which the SSE
+    // bridge should forward as a columns:update broadcast.
+    await handleRequest(
+      makeRequest("POST", "/api/plugin/event", {
+        pluginId,
+        event: "agent:active",
+        data: {
+          beadId: "bd-test",
+          sessionId: "session-1",
+          agent: "orchestrator",
+        },
+      })
+    );
+
+    // Check that a columns:update SSE event was broadcast
+    const columnsUpdateMsg = received.find((msg) =>
+      msg.includes("event: columns:update")
+    );
+
+    // The columns:update SSE event MUST have been broadcast because
+    // the orchestrator becoming active makes pipeline columns visible.
+    expect(columnsUpdateMsg).toBeDefined();
+    expect(columnsUpdateMsg).toContain("visibleColumns");
+    expect(columnsUpdateMsg).toContain("projectPath");
+
+    reader.cancel();
+  });
+
+  it("includes visibleColumns in state:full response", async () => {
+    const pluginId = await registerPlugin();
+
+    // Discover a bead and trigger a stage transition so columns are created
+    await handleRequest(
+      makeRequest("POST", "/api/plugin/event", {
+        pluginId,
+        event: "bead:discovered",
+        data: {
+          bead: {
+            id: "bd-test",
+            title: "Test",
+            status: "open",
+            priority: 1,
+            issue_type: "task",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        },
+      })
+    );
+
+    // Get state via API — should include visibleColumns field
+    const stateRes = await handleRequest(makeRequest("GET", "/api/state"));
+    const stateData = (await jsonBody(stateRes)) as {
+      projects: Array<{
+        projectPath: string;
+        columns: unknown[];
+        visibleColumns: unknown[];
+        activeAgents: string[];
+      }>;
+    };
+
+    expect(stateData.projects.length).toBe(1);
+    const project = stateData.projects[0];
+    // visibleColumns should be present (computed by stateManager.toJSON)
+    expect(Array.isArray(project.visibleColumns)).toBe(true);
+    // activeAgents should be present (serialized from stateManager)
+    expect(Array.isArray(project.activeAgents)).toBe(true);
+  });
+});
+
 describe("integration: register -> event -> deregister", () => {
   beforeEach(cleanup);
 

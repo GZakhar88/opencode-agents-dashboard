@@ -2077,6 +2077,173 @@ describe("boardReducer", () => {
   });
 
   // ----------------------------------------------------------
+  // STATE_FULL backward compatibility
+  // ----------------------------------------------------------
+  describe("STATE_FULL backward compatibility", () => {
+    it("handles old payload without columns or activeAgents", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [
+              {
+                id: "pipe-1",
+                title: "Pipeline",
+                status: "active",
+                currentBeadId: null,
+                beads: [
+                  {
+                    id: "bead-1",
+                    title: "Test",
+                    description: "",
+                    priority: 1,
+                    issueType: "task",
+                    bdStatus: "open",
+                    stage: "ready",
+                    stageStartedAt: 1000,
+                  },
+                ],
+              },
+            ],
+            lastBeadSnapshot: [],
+            // No columns, no activeAgents — old state format
+          },
+        ],
+      };
+
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project).toBeDefined();
+      expect(project.pipelines.size).toBe(1);
+      expect(project.pipelines.get("pipe-1")!.beads.size).toBe(1);
+      // columns should default to empty array
+      expect(project.columns).toEqual([]);
+      // activeAgents is optional on the type, not set by deserializer
+      expect(project.activeAgents).toBeUndefined();
+    });
+
+    it("tolerates activeAgents in payload without crashing", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            ],
+            activeAgents: ["builder", "reviewer"],
+          },
+        ],
+      };
+
+      // Should not throw — activeAgents is in the payload but the
+      // frontend deserializer doesn't consume it (server-only field)
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project).toBeDefined();
+      expect(project.columns.length).toBe(1);
+    });
+
+    it("preserves group and source fields on columns through STATE_FULL", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+              { id: "builder", label: "Builder", type: "agent", color: "#3b82f6", order: 2, group: "pipeline", source: "discovered" },
+              { id: "custom-agent", label: "Custom Agent", type: "agent", color: "#ec4899", order: 3, group: "standalone", source: "dynamic" },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 4 },
+              { id: "error", label: "Error", type: "status", color: "#ef4444", order: 5 },
+            ],
+          },
+        ],
+      };
+
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(6);
+
+      const orchestratorCol = project.columns.find((c) => c.id === "orchestrator")!;
+      expect(orchestratorCol.group).toBe("pipeline");
+      expect(orchestratorCol.source).toBe("discovered");
+
+      const customCol = project.columns.find((c) => c.id === "custom-agent")!;
+      expect(customCol.group).toBe("standalone");
+      expect(customCol.source).toBe("dynamic");
+
+      // Status columns shouldn't have group/source
+      const readyCol = project.columns.find((c) => c.id === "ready")!;
+      expect(readyCol.group).toBeUndefined();
+      expect(readyCol.source).toBeUndefined();
+    });
+
+    it("handles old columns without group/source fields", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1 },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+              { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+            ],
+          },
+        ],
+      };
+
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(4);
+
+      // Old columns without group/source should still work
+      const orchCol = project.columns.find((c) => c.id === "orchestrator")!;
+      expect(orchCol).toBeDefined();
+      expect(orchCol.group).toBeUndefined();
+      expect(orchCol.source).toBeUndefined();
+    });
+  });
+
+  // ----------------------------------------------------------
   // STATE_FULL with visibleColumns
   // ----------------------------------------------------------
   describe("STATE_FULL with visibleColumns", () => {

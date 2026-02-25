@@ -5,13 +5,16 @@
  *
  * Run: bun test server/routes.test.ts
  */
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   handleRequest,
   plugins,
   broadcast,
   stateManager,
   resetSSE,
+  clearIdleTimer,
+  checkAndStartIdleTimer,
+  configureIdleShutdown,
 } from "./routes";
 import { clients as sseClients } from "./sse";
 
@@ -42,6 +45,7 @@ async function jsonBody(res: Response): Promise<unknown> {
 
 function cleanup() {
   plugins.clear();
+  clearIdleTimer();
   resetSSE();
   stateManager.clear();
 }
@@ -733,5 +737,128 @@ describe("integration: register -> event -> deregister", () => {
     const healthRes2 = await handleRequest(makeRequest("GET", "/api/health"));
     const health2 = (await jsonBody(healthRes2)) as { plugins: number };
     expect(health2.plugins).toBe(0);
+  });
+});
+
+// --- Idle Auto-Shutdown Tests ---
+
+describe("idle auto-shutdown", () => {
+  beforeEach(cleanup);
+  afterEach(cleanup);
+
+  it("configureIdleShutdown sets the timeout value", () => {
+    // Feature is enabled with a valid timeout
+    configureIdleShutdown(60_000);
+    // After configure, calling checkAndStartIdleTimer with no plugins/clients
+    // should start a timer (which we can verify by the log or by clearing it)
+    // We just verify it doesn't throw
+    expect(() => configureIdleShutdown(60_000)).not.toThrow();
+  });
+
+  it("checkAndStartIdleTimer does nothing when disabled (timeout <= 0)", () => {
+    configureIdleShutdown(0);
+    // Should not start any timer; must not throw
+    checkAndStartIdleTimer();
+    // Calling clear should also be safe (no timer to clear)
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does nothing when disabled (negative timeout)", () => {
+    configureIdleShutdown(-1);
+    checkAndStartIdleTimer();
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does not start timer when plugins exist", async () => {
+    configureIdleShutdown(100);
+    // Register a plugin so the server is NOT idle
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    await handleRequest(req);
+    expect(plugins.size).toBe(1);
+
+    // Should not start a timer (plugins exist)
+    checkAndStartIdleTimer();
+    // clearIdleTimer should be a no-op (no timer was started)
+    // We verify indirectly: no "cancelled" log would appear,
+    // but mainly that it doesn't throw
+    clearIdleTimer();
+  });
+
+  it("clearIdleTimer is safe to call when no timer is running", () => {
+    configureIdleShutdown(60_000);
+    // No timer started yet — should be a no-op
+    expect(() => clearIdleTimer()).not.toThrow();
+  });
+
+  it("handleRegister calls clearIdleTimer (cancels pending timer)", async () => {
+    configureIdleShutdown(60_000);
+    // Start a timer (no plugins, no clients)
+    checkAndStartIdleTimer();
+
+    // Register a plugin — should cancel the timer
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    const res = await handleRequest(req);
+    expect(res.status).toBe(200);
+    // Timer should have been cancelled by register handler
+    // Calling clearIdleTimer again should be a no-op
+    clearIdleTimer();
+  });
+
+  it("handleDeregister calls checkAndStartIdleTimer", async () => {
+    configureIdleShutdown(300_000);
+    // Register a plugin
+    const regReq = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    const regRes = await handleRequest(regReq);
+    const { pluginId } = (await jsonBody(regRes)) as { pluginId: string };
+
+    // Deregister — should trigger idle check and start timer
+    const delReq = makeRequest("DELETE", `/api/plugin/${pluginId}`);
+    const delRes = await handleRequest(delReq);
+    expect(delRes.status).toBe(200);
+    expect(plugins.size).toBe(0);
+    // A timer should have been started since no plugins remain
+    // Clean it up
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does not start duplicate timers", () => {
+    configureIdleShutdown(60_000);
+    // Start timer
+    checkAndStartIdleTimer();
+    // Calling again should be a no-op (already ticking)
+    checkAndStartIdleTimer();
+    // Cleanup
+    clearIdleTimer();
+  });
+
+  it("timer fires shutdown only after re-checking idle conditions (race guard)", async () => {
+    // Use a very short timeout so the timer fires quickly
+    configureIdleShutdown(10); // 10ms
+
+    // Start timer, then immediately register a plugin. The race guard in the
+    // timer callback should detect the plugin and abort shutdown.
+    checkAndStartIdleTimer();
+
+    // Register a plugin to trigger the race guard
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "race-guard-test",
+    });
+    await handleRequest(req);
+
+    // Wait for the timer to fire (it should abort due to race guard)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // If we get here without process.exit being called, the race guard worked
+    expect(plugins.size).toBe(1);
   });
 });

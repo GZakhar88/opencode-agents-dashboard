@@ -56,6 +56,183 @@ interface SerializedDashboardState {
   projects: [string, SerializedProjectState][];
 }
 
+// --- Constants for dynamic column creation ---
+
+/** Stages that are bookends and should never get dynamic columns */
+const BOOKEND_STAGES = new Set(["ready", "done", "error"]);
+
+/** Pipeline agent IDs with their fixed order */
+const PIPELINE_AGENT_ORDER: Record<string, number> = {
+  orchestrator: 1,
+  "pipeline-builder": 2,
+  "pipeline-refactor": 3,
+  "pipeline-reviewer": 4,
+  "pipeline-committer": 5,
+};
+
+/** Default color palette for dynamically created agent columns */
+const DEFAULT_COLUMN_COLORS = [
+  "#8b5cf6", // violet
+  "#3b82f6", // blue
+  "#06b6d4", // cyan
+  "#f59e0b", // amber
+  "#10b981", // emerald
+  "#ec4899", // pink
+  "#f97316", // orange
+  "#6366f1", // indigo
+];
+
+/**
+ * Format agent name into a human-readable label.
+ * Strips 'pipeline-' prefix and capitalizes the first letter.
+ *
+ * Examples:
+ *   'pipeline-builder' → 'Builder'
+ *   'build' → 'Build'
+ *   'my-custom-agent' → 'My-custom-agent'
+ */
+export function formatAgentLabel(name: string): string {
+  const display = name.startsWith("pipeline-")
+    ? name.slice("pipeline-".length)
+    : name;
+  return display.charAt(0).toUpperCase() + display.slice(1);
+}
+
+/**
+ * Check if a column with the given ID already exists in a project's columns.
+ */
+export function hasColumn(project: ProjectState, stageId: string): boolean {
+  return project.columns.some((col) => col.id === stageId);
+}
+
+/**
+ * Pick a color from the default palette, avoiding colors already used
+ * by existing columns.
+ */
+export function pickColor(project: ProjectState, _stageId: string): string {
+  const usedColors = new Set(project.columns.map((col) => col.color));
+  for (const color of DEFAULT_COLUMN_COLORS) {
+    if (!usedColors.has(color)) {
+      return color;
+    }
+  }
+  // All colors used — cycle through palette based on column count
+  return DEFAULT_COLUMN_COLORS[
+    project.columns.length % DEFAULT_COLUMN_COLORS.length
+  ];
+}
+
+/**
+ * Compute the correct order for a new column, then re-normalize all
+ * order values to clean sequential integers.
+ *
+ * Pipeline agents get their fixed order (1-5).
+ * Standalone agents insert before "done".
+ * After insertion, all columns are re-ordered to sequential integers.
+ */
+export function computeOrder(project: ProjectState, stageId: string): number {
+  // If it's a pipeline agent, assign its fixed order
+  if (stageId in PIPELINE_AGENT_ORDER) {
+    return PIPELINE_AGENT_ORDER[stageId];
+  }
+
+  // Standalone: insert before "done"
+  const doneCol = project.columns.find((c) => c.id === "done");
+  if (doneCol) {
+    return doneCol.order;
+  }
+
+  // No "done" column yet — put it at the end
+  return project.columns.length;
+}
+
+/**
+ * Re-normalize all column order values to clean sequential integers
+ * based on the defined ordering rules:
+ *   0: ready
+ *   1-5: pipeline agents (orchestrator, builder, refactor, reviewer, committer)
+ *   6+: standalone agents (alphabetical)
+ *   second-to-last: done
+ *   last: error
+ */
+function renormalizeColumnOrders(project: ProjectState): void {
+  const ready: ColumnConfig[] = [];
+  const pipeline: ColumnConfig[] = [];
+  const standalone: ColumnConfig[] = [];
+  const done: ColumnConfig[] = [];
+  const error: ColumnConfig[] = [];
+
+  for (const col of project.columns) {
+    if (col.id === "ready") {
+      ready.push(col);
+    } else if (col.id === "done") {
+      done.push(col);
+    } else if (col.id === "error") {
+      error.push(col);
+    } else if (col.id in PIPELINE_AGENT_ORDER) {
+      pipeline.push(col);
+    } else {
+      standalone.push(col);
+    }
+  }
+
+  // Sort pipeline agents by their fixed order
+  pipeline.sort(
+    (a, b) =>
+      (PIPELINE_AGENT_ORDER[a.id] ?? 99) -
+      (PIPELINE_AGENT_ORDER[b.id] ?? 99)
+  );
+
+  // Sort standalone agents alphabetically
+  standalone.sort((a, b) => a.id.localeCompare(b.id));
+
+  // Reassemble and assign sequential order values
+  const sorted = [...ready, ...pipeline, ...standalone, ...done, ...error];
+  for (let i = 0; i < sorted.length; i++) {
+    sorted[i].order = i;
+  }
+  project.columns = sorted;
+}
+
+/**
+ * Create a new dynamic ColumnConfig for an unknown stage.
+ *
+ * Returns the new column, or null if:
+ * - The stage is a bookend ("ready", "done", "error")
+ * - A column with this ID already exists
+ */
+export function createDynamicColumn(
+  project: ProjectState,
+  stageId: string
+): ColumnConfig | null {
+  // Don't create columns for bookend stages
+  if (BOOKEND_STAGES.has(stageId)) {
+    return null;
+  }
+
+  // Don't create duplicates
+  if (hasColumn(project, stageId)) {
+    return null;
+  }
+
+  const isPipelineAgent = stageId in PIPELINE_AGENT_ORDER;
+
+  const column: ColumnConfig = {
+    id: stageId,
+    label: formatAgentLabel(stageId),
+    type: "agent",
+    color: pickColor(project, stageId),
+    order: computeOrder(project, stageId),
+    group: isPipelineAgent ? "pipeline" : "standalone",
+    source: "dynamic",
+  };
+
+  project.columns.push(column);
+  renormalizeColumnOrders(project);
+
+  return column;
+}
+
 // --- StateManager ---
 
 export class StateManager {
@@ -373,6 +550,9 @@ export class StateManager {
       }
       pipeline.currentBeadId = beadId;
       pipeline.status = "active";
+
+      // Auto-create column for unknown stages
+      createDynamicColumn(project, stage);
     }
 
     if (beadRecord) {
@@ -409,6 +589,9 @@ export class StateManager {
           beadState.agentSessionId = agentSessionId;
         }
       }
+
+      // Auto-create column for unknown stages
+      createDynamicColumn(project, stage);
     }
     this.schedulePersist();
 

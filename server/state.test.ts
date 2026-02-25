@@ -14,7 +14,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { StateManager } from "./state";
+import {
+  StateManager,
+  formatAgentLabel,
+  hasColumn,
+  pickColor,
+  computeOrder,
+  createDynamicColumn,
+} from "./state";
+import type { ProjectState, ColumnConfig } from "../shared/types";
 import { existsSync, unlinkSync } from "fs";
 import { join } from "path";
 
@@ -1434,6 +1442,516 @@ describe("StateManager - Full lifecycle integration", () => {
     expect(pipeline.beads.get("bd-1")!.stage).toBe("done");
     expect(pipeline.beads.get("bd-2")!.stage).toBe("ready");
     expect(pipeline.beads.get("bd-3")!.stage).toBe("ready");
+  });
+});
+
+describe("StateManager - Dynamic Column Creation", () => {
+  let sm: StateManager;
+
+  beforeEach(() => {
+    cleanup();
+    sm = createManager();
+    sm.registerPlugin("p1", "/path/project-a", "project-a");
+    // Set up initial columns (as would be sent by the plugin via columns:update)
+    sm.processEvent("p1", "columns:update", {
+      columns: [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ],
+    });
+    // Discover a bead
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-abc",
+        title: "Test bead",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-abc",
+      stage: "orchestrator",
+    });
+  });
+
+  afterEach(() => {
+    sm.destroy();
+    cleanup();
+  });
+
+  it("creates a new column when bead:stage has unknown stage", () => {
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const col = project.columns.find((c) => c.id === "pipeline-builder");
+    expect(col).toBeDefined();
+    expect(col!.label).toBe("Builder");
+    expect(col!.type).toBe("agent");
+    expect(col!.group).toBe("pipeline");
+    expect(col!.source).toBe("dynamic");
+  });
+
+  it("creates a new column when bead:claimed has unknown stage", () => {
+    // Discover a second bead
+    sm.processEvent("p1", "bead:discovered", {
+      bead: {
+        id: "bd-xyz",
+        title: "Another bead",
+        description: "",
+        status: "open",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    });
+    sm.processEvent("p1", "bead:claimed", {
+      beadId: "bd-xyz",
+      bead: {
+        id: "bd-xyz",
+        title: "Another bead",
+        description: "",
+        status: "in_progress",
+        priority: 1,
+        issue_type: "task",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+      stage: "my-custom-agent",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const col = project.columns.find((c) => c.id === "my-custom-agent");
+    expect(col).toBeDefined();
+    expect(col!.label).toBe("My-custom-agent");
+    expect(col!.group).toBe("standalone");
+    expect(col!.source).toBe("dynamic");
+  });
+
+  it("does NOT create a column for 'ready' stage", () => {
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colCountBefore = project.columns.length;
+
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "ready",
+    });
+
+    // Should not have added a new column
+    expect(project.columns.length).toBe(colCountBefore);
+  });
+
+  it("does NOT create a column for 'done' stage", () => {
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colCountBefore = project.columns.length;
+
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "done",
+    });
+
+    expect(project.columns.length).toBe(colCountBefore);
+  });
+
+  it("does NOT create a column for 'error' stage", () => {
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colCountBefore = project.columns.length;
+
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "error",
+    });
+
+    expect(project.columns.length).toBe(colCountBefore);
+  });
+
+  it("does NOT create duplicate columns", () => {
+    // Create first
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colCountAfterFirst = project.columns.length;
+
+    // Try to create again
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+
+    expect(project.columns.length).toBe(colCountAfterFirst);
+  });
+
+  it("does NOT create column for already-existing stage (orchestrator)", () => {
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colCountBefore = project.columns.length;
+
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "orchestrator",
+    });
+
+    expect(project.columns.length).toBe(colCountBefore);
+  });
+
+  it("pipeline agents get group='pipeline'", () => {
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    expect(project.columns.find((c) => c.id === "pipeline-builder")!.group).toBe("pipeline");
+  });
+
+  it("standalone agents get group='standalone'", () => {
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "my-agent",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    expect(project.columns.find((c) => c.id === "my-agent")!.group).toBe("standalone");
+  });
+
+  it("maintains order: ready < pipeline < standalone < done < error", () => {
+    // Add pipeline and standalone agents
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-reviewer",
+    });
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "custom-agent",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const colIds = project.columns
+      .sort((a, b) => a.order - b.order)
+      .map((c) => c.id);
+
+    // ready should be first
+    expect(colIds[0]).toBe("ready");
+    // done should be second to last
+    expect(colIds[colIds.length - 2]).toBe("done");
+    // error should be last
+    expect(colIds[colIds.length - 1]).toBe("error");
+
+    // pipeline agents should come before standalone
+    const builderOrder = project.columns.find((c) => c.id === "pipeline-builder")!.order;
+    const reviewerOrder = project.columns.find((c) => c.id === "pipeline-reviewer")!.order;
+    const customOrder = project.columns.find((c) => c.id === "custom-agent")!.order;
+    const doneOrder = project.columns.find((c) => c.id === "done")!.order;
+
+    expect(builderOrder).toBeLessThan(reviewerOrder);
+    expect(reviewerOrder).toBeLessThan(customOrder);
+    expect(customOrder).toBeLessThan(doneOrder);
+  });
+
+  it("colors don't duplicate existing columns when possible", () => {
+    // Create multiple dynamic columns and check colors are unique
+    const stages = [
+      "pipeline-builder",
+      "pipeline-refactor",
+      "pipeline-reviewer",
+      "pipeline-committer",
+      "custom-1",
+      "custom-2",
+    ];
+
+    for (const stage of stages) {
+      sm.processEvent("p1", "bead:stage", {
+        beadId: "bd-abc",
+        stage,
+      });
+    }
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const dynamicCols = project.columns.filter((c) => c.source === "dynamic");
+    const colors = dynamicCols.map((c) => c.color);
+    const uniqueColors = new Set(colors);
+    // All dynamic columns should have unique colors (we have 8 in palette)
+    expect(uniqueColors.size).toBe(colors.length);
+  });
+
+  it("order values are clean sequential integers after insertion", () => {
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "pipeline-builder",
+    });
+    sm.processEvent("p1", "bead:stage", {
+      beadId: "bd-abc",
+      stage: "custom-agent",
+    });
+
+    const project = sm.getState().projects.get("/path/project-a")!;
+    const orders = project.columns.map((c) => c.order).sort((a, b) => a - b);
+
+    // Orders should be 0, 1, 2, ..., n-1
+    for (let i = 0; i < orders.length; i++) {
+      expect(orders[i]).toBe(i);
+    }
+  });
+});
+
+describe("formatAgentLabel", () => {
+  it("strips pipeline- prefix and capitalizes", () => {
+    expect(formatAgentLabel("pipeline-builder")).toBe("Builder");
+  });
+
+  it("capitalizes regular agent name", () => {
+    expect(formatAgentLabel("build")).toBe("Build");
+  });
+
+  it("capitalizes hyphenated agent name", () => {
+    expect(formatAgentLabel("my-custom-agent")).toBe("My-custom-agent");
+  });
+
+  it("handles orchestrator", () => {
+    expect(formatAgentLabel("orchestrator")).toBe("Orchestrator");
+  });
+
+  it("handles pipeline-refactor", () => {
+    expect(formatAgentLabel("pipeline-refactor")).toBe("Refactor");
+  });
+});
+
+describe("hasColumn", () => {
+  it("returns true when column exists", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#000", order: 0 },
+      ],
+    } as ProjectState;
+    expect(hasColumn(project, "ready")).toBe(true);
+  });
+
+  it("returns false when column does not exist", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#000", order: 0 },
+      ],
+    } as ProjectState;
+    expect(hasColumn(project, "builder")).toBe(false);
+  });
+
+  it("returns false on empty columns", () => {
+    const project = { columns: [] } as unknown as ProjectState;
+    expect(hasColumn(project, "ready")).toBe(false);
+  });
+});
+
+describe("pickColor", () => {
+  it("picks first available color", () => {
+    const project = { columns: [] } as unknown as ProjectState;
+    const color = pickColor(project, "test");
+    expect(color).toBe("#8b5cf6"); // first in palette
+  });
+
+  it("avoids already-used colors", () => {
+    const project = {
+      columns: [
+        { id: "a", color: "#8b5cf6", label: "", type: "agent" as const, order: 0 },
+      ],
+    } as ProjectState;
+    const color = pickColor(project, "test");
+    expect(color).toBe("#3b82f6"); // second in palette
+  });
+
+  it("cycles when all colors are used", () => {
+    const project = {
+      columns: [
+        { id: "1", color: "#8b5cf6", label: "", type: "agent" as const, order: 0 },
+        { id: "2", color: "#3b82f6", label: "", type: "agent" as const, order: 1 },
+        { id: "3", color: "#06b6d4", label: "", type: "agent" as const, order: 2 },
+        { id: "4", color: "#f59e0b", label: "", type: "agent" as const, order: 3 },
+        { id: "5", color: "#10b981", label: "", type: "agent" as const, order: 4 },
+        { id: "6", color: "#ec4899", label: "", type: "agent" as const, order: 5 },
+        { id: "7", color: "#f97316", label: "", type: "agent" as const, order: 6 },
+        { id: "8", color: "#6366f1", label: "", type: "agent" as const, order: 7 },
+      ],
+    } as ProjectState;
+    // All colors used; should cycle
+    const color = pickColor(project, "test");
+    expect(typeof color).toBe("string");
+    expect(color.startsWith("#")).toBe(true);
+  });
+});
+
+describe("computeOrder", () => {
+  it("returns fixed order for pipeline agents", () => {
+    const project = {
+      columns: [
+        { id: "ready", order: 0 },
+        { id: "done", order: 5 },
+      ],
+    } as unknown as ProjectState;
+
+    expect(computeOrder(project, "orchestrator")).toBe(1);
+    expect(computeOrder(project, "pipeline-builder")).toBe(2);
+    expect(computeOrder(project, "pipeline-refactor")).toBe(3);
+    expect(computeOrder(project, "pipeline-reviewer")).toBe(4);
+    expect(computeOrder(project, "pipeline-committer")).toBe(5);
+  });
+
+  it("inserts standalone agents before done column", () => {
+    const project = {
+      columns: [
+        { id: "ready", order: 0 },
+        { id: "orchestrator", order: 1 },
+        { id: "done", order: 2 },
+        { id: "error", order: 3 },
+      ],
+    } as unknown as ProjectState;
+
+    const order = computeOrder(project, "custom-agent");
+    expect(order).toBe(2); // same as done, will be reordered by renormalize
+  });
+
+  it("returns column count when no done column", () => {
+    const project = {
+      columns: [
+        { id: "ready", order: 0 },
+      ],
+    } as unknown as ProjectState;
+
+    const order = computeOrder(project, "custom-agent");
+    expect(order).toBe(1);
+  });
+});
+
+describe("createDynamicColumn", () => {
+  it("returns null for bookend stages", () => {
+    const project = { columns: [] } as unknown as ProjectState;
+    expect(createDynamicColumn(project, "ready")).toBeNull();
+    expect(createDynamicColumn(project, "done")).toBeNull();
+    expect(createDynamicColumn(project, "error")).toBeNull();
+  });
+
+  it("returns null for duplicate column", () => {
+    const project = {
+      columns: [
+        { id: "builder", label: "Builder", type: "agent" as const, color: "#8b5cf6", order: 1 },
+      ],
+    } as ProjectState;
+    expect(createDynamicColumn(project, "builder")).toBeNull();
+    expect(project.columns.length).toBe(1);
+  });
+
+  it("creates a pipeline column with correct properties", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    const col = createDynamicColumn(project, "pipeline-builder");
+    expect(col).not.toBeNull();
+    expect(col!.id).toBe("pipeline-builder");
+    expect(col!.label).toBe("Builder");
+    expect(col!.group).toBe("pipeline");
+    expect(col!.source).toBe("dynamic");
+    expect(col!.type).toBe("agent");
+  });
+
+  it("creates a standalone column with correct properties", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    const col = createDynamicColumn(project, "my-agent");
+    expect(col).not.toBeNull();
+    expect(col!.id).toBe("my-agent");
+    expect(col!.label).toBe("My-agent");
+    expect(col!.group).toBe("standalone");
+    expect(col!.source).toBe("dynamic");
+  });
+
+  it("re-normalizes order after insertion", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    createDynamicColumn(project, "pipeline-builder");
+
+    // Orders should be: ready=0, pipeline-builder=1, done=2, error=3
+    expect(project.columns.find((c) => c.id === "ready")!.order).toBe(0);
+    expect(project.columns.find((c) => c.id === "pipeline-builder")!.order).toBe(1);
+    expect(project.columns.find((c) => c.id === "done")!.order).toBe(2);
+    expect(project.columns.find((c) => c.id === "error")!.order).toBe(3);
+  });
+
+  it("standalone agents sort alphabetically and insert before done", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 1 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 2 },
+      ],
+    } as ProjectState;
+
+    createDynamicColumn(project, "zebra-agent");
+    createDynamicColumn(project, "alpha-agent");
+
+    const sorted = project.columns.sort((a, b) => a.order - b.order);
+    const ids = sorted.map((c) => c.id);
+
+    // ready, alpha-agent, zebra-agent, done, error
+    expect(ids).toEqual(["ready", "alpha-agent", "zebra-agent", "done", "error"]);
+  });
+
+  it("pipeline agents order correctly among mixed columns", () => {
+    const project = {
+      columns: [
+        { id: "ready", label: "Ready", type: "status" as const, color: "#64748b", order: 0 },
+        { id: "orchestrator", label: "Orchestrator", type: "agent" as const, color: "#8b5cf6", order: 1, group: "pipeline" as const },
+        { id: "done", label: "Done", type: "status" as const, color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status" as const, color: "#ef4444", order: 3 },
+      ],
+    } as ProjectState;
+
+    createDynamicColumn(project, "pipeline-reviewer");
+    createDynamicColumn(project, "pipeline-builder");
+    createDynamicColumn(project, "custom-agent");
+
+    const sorted = project.columns.sort((a, b) => a.order - b.order);
+    const ids = sorted.map((c) => c.id);
+
+    // ready, orchestrator, pipeline-builder, pipeline-reviewer, custom-agent, done, error
+    expect(ids).toEqual([
+      "ready",
+      "orchestrator",
+      "pipeline-builder",
+      "pipeline-reviewer",
+      "custom-agent",
+      "done",
+      "error",
+    ]);
   });
 });
 

@@ -23,9 +23,12 @@ interface BoardProps {
 }
 
 export function Board({ pipeline, isExpanded, columns }: BoardProps) {
-  // Use provided columns or fall back to defaults
-  const columnConfig =
-    columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  // Use provided columns. Fall back to defaults only when no project
+  // data exists at all (columns prop is undefined). An empty array means
+  // the project is connected but no columns are visible yet — render
+  // nothing rather than stale defaults so columns appear smoothly once
+  // the server broadcasts the visible set.
+  const columnConfig = columns !== undefined ? columns : DEFAULT_COLUMNS;
 
   // Sort columns by order
   const sortedColumns = [...columnConfig].sort((a, b) => a.order - b.order);

@@ -263,9 +263,16 @@ export interface PipelineDonePayload extends BaseEventPayload {
   pipelineId: string;
 }
 
-/** columns:update — plugin sends column configuration for the project */
+/** columns:update — server broadcasts visible column set for the project.
+ *
+ * The SSE bridge in routes.ts sends `visibleColumns` (the subset currently
+ * visible based on active pipelines / agents). The original plugin payload
+ * uses `columns` (full set). The reducer accepts either field so it works
+ * with both the SSE bridge and the raw plugin event.
+ */
 export interface ColumnsUpdatePayload extends BaseEventPayload {
-  columns: ColumnConfig[];
+  columns?: ColumnConfig[];
+  visibleColumns?: ColumnConfig[];
 }
 
 /** Map of event type to its payload type */

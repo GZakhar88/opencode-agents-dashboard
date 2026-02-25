@@ -1954,4 +1954,195 @@ describe("boardReducer", () => {
       expect(bead2.error).toBe("Review timeout");
     });
   });
+
+  // ----------------------------------------------------------
+  // COLUMNS_UPDATE
+  // ----------------------------------------------------------
+  describe("COLUMNS_UPDATE", () => {
+    it("stores columns from visibleColumns field (SSE bridge format)", () => {
+      const state = makeStateWithBead("bead-1");
+      const result = boardReducer(state, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "/test/project",
+          visibleColumns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            { id: "builder", label: "Builder", type: "agent", color: "#8b5cf6", order: 1, group: "pipeline", source: "discovered" },
+            { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+            { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+          ],
+        } as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(4);
+      expect(project.columns.map((c) => c.id)).toEqual(["ready", "builder", "done", "error"]);
+      // Verify new fields are stored correctly
+      expect(project.columns[1].group).toBe("pipeline");
+      expect(project.columns[1].source).toBe("discovered");
+    });
+
+    it("stores columns from columns field (raw plugin format)", () => {
+      const state = makeStateWithBead("bead-1");
+      const result = boardReducer(state, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "/test/project",
+          columns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+          ],
+        } as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(2);
+    });
+
+    it("prefers visibleColumns over columns when both are present", () => {
+      const state = makeStateWithBead("bead-1");
+      const result = boardReducer(state, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "/test/project",
+          columns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+          ],
+          visibleColumns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            { id: "builder", label: "Builder", type: "agent", color: "#8b5cf6", order: 1 },
+            { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+          ],
+        } as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(3);
+      expect(project.columns.map((c) => c.id)).toEqual(["ready", "builder", "done"]);
+    });
+
+    it("returns state unchanged when projectPath is missing", () => {
+      const result = boardReducer(initialState, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "",
+          visibleColumns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+          ],
+        } as any,
+      });
+
+      expect(result).toBe(initialState);
+    });
+
+    it("returns state unchanged when neither columns nor visibleColumns is present", () => {
+      const state = makeStateWithBead("bead-1");
+      const result = boardReducer(state, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "/test/project",
+        } as any,
+      });
+
+      expect(result).toBe(state);
+    });
+
+    it("handles columns disappearing (smaller visible set)", () => {
+      // Start with 4 columns
+      const state = makeStateWithBead("bead-1");
+      state.projects.get("/test/project")!.columns = [
+        { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+        { id: "builder", label: "Builder", type: "agent", color: "#8b5cf6", order: 1 },
+        { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+        { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+      ];
+
+      // Update with builder removed from visible set
+      const result = boardReducer(state, {
+        type: "COLUMNS_UPDATE",
+        payload: {
+          projectPath: "/test/project",
+          visibleColumns: [
+            { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+            { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+            { id: "error", label: "Error", type: "status", color: "#ef4444", order: 2 },
+          ],
+        } as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(3);
+      expect(project.columns.map((c) => c.id)).toEqual(["ready", "done", "error"]);
+    });
+  });
+
+  // ----------------------------------------------------------
+  // STATE_FULL with visibleColumns
+  // ----------------------------------------------------------
+  describe("STATE_FULL with visibleColumns", () => {
+    it("prefers visibleColumns over columns in state:full payload", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "builder", label: "Builder", type: "agent", color: "#8b5cf6", order: 1 },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 2 },
+              { id: "error", label: "Error", type: "status", color: "#ef4444", order: 3 },
+            ],
+            visibleColumns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+              { id: "error", label: "Error", type: "status", color: "#ef4444", order: 2 },
+            ],
+          },
+        ],
+      };
+
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      // Should use visibleColumns (3 items) not columns (4 items)
+      expect(project.columns.length).toBe(3);
+      expect(project.columns.map((c) => c.id)).toEqual(["ready", "done", "error"]);
+    });
+
+    it("falls back to columns when visibleColumns is not in state:full payload", () => {
+      const payload = {
+        projects: [
+          {
+            projectPath: "/test/project",
+            projectName: "project",
+            pluginId: "p1",
+            lastHeartbeat: 1000,
+            connected: true,
+            pipelines: [],
+            lastBeadSnapshot: [],
+            columns: [
+              { id: "ready", label: "Ready", type: "status", color: "#64748b", order: 0 },
+              { id: "done", label: "Done", type: "status", color: "#22c55e", order: 1 },
+            ],
+          },
+        ],
+      };
+
+      const result = boardReducer(initialState, {
+        type: "STATE_FULL",
+        payload: payload as any,
+      });
+
+      const project = result.projects.get("/test/project")!;
+      expect(project.columns.length).toBe(2);
+    });
+  });
 });

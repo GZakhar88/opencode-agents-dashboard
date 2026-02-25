@@ -13,10 +13,20 @@ import {
   closeAllSSEClients,
   stateManager,
   stopHealthMonitoring,
+  configureIdleShutdown,
+  checkAndStartIdleTimer,
 } from "./routes";
 import { writePid, removePid } from "./pid";
 
 const PORT = Number(process.env.DASHBOARD_PORT) || 3333;
+
+const DEFAULT_IDLE_TIMEOUT_MS = 300_000; // 5 minutes
+const rawIdleTimeout = process.env.DASHBOARD_IDLE_TIMEOUT_MS;
+const parsedIdleTimeout = rawIdleTimeout ? parseInt(rawIdleTimeout, 10) : NaN;
+const IDLE_TIMEOUT_MS =
+  Number.isFinite(parsedIdleTimeout) && parsedIdleTimeout >= 0
+    ? parsedIdleTimeout
+    : DEFAULT_IDLE_TIMEOUT_MS;
 
 const server = Bun.serve({
   port: PORT,
@@ -29,6 +39,9 @@ writePid(process.pid, server.port ?? PORT);
 
 console.log(`[dashboard-server] Running on http://localhost:${server.port}`);
 console.log(`[dashboard-server] PID: ${process.pid}`);
+console.log(
+  `[dashboard-server] Idle auto-shutdown timeout: ${IDLE_TIMEOUT_MS === 0 ? "disabled" : `${IDLE_TIMEOUT_MS}ms`}`,
+);
 console.log(`[dashboard-server] Endpoints:`);
 console.log(`  POST   /api/plugin/register`);
 console.log(`  POST   /api/plugin/event`);
@@ -38,9 +51,13 @@ console.log(`  GET    /api/state`);
 console.log(`  GET    /api/events`);
 console.log(`  GET    /api/health`);
 
+// --- Idle Auto-Shutdown ---
+configureIdleShutdown(IDLE_TIMEOUT_MS);
+checkAndStartIdleTimer();
+
 // --- Graceful Shutdown ---
 
-function shutdown() {
+export function shutdown() {
   console.log(`\n[dashboard-server] Shutting down...`);
   stateManager.persistNow(); // Flush state to disk before shutdown
   stopHealthMonitoring();

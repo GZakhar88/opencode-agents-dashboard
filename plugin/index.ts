@@ -74,6 +74,7 @@ let currentBeadId: string | null = null;
 let sessionToAgent = new Map<string, string>();
 let pendingAgentType: string | null = null;
 let currentAgentName: string | null = null; // tracks the agent handling the current chat.message
+let activePrimarySession: string | null = null; // tracks primary session with active agent:active event
 
 // Agent discovery results
 let discoveredAgents: DiscoveredAgent[] = [];
@@ -432,6 +433,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(orchestratorAgent),
       order: order++,
+      group: "pipeline",
     });
   }
 
@@ -443,6 +445,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(agent),
       order: order++,
+      group: "pipeline",
     });
   }
 
@@ -454,6 +457,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(agent),
       order: order++,
+      group: "standalone",
     });
   }
 
@@ -1245,6 +1249,17 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
         currentAgentName = agent;
       }
 
+      // Send agent:active for primary agents (not subagents tracked in sessionToAgent)
+      // Only send if not already active for this session to avoid duplicates
+      if (agent && serverReady && !sessionToAgent.has(sessionID) && activePrimarySession !== sessionID) {
+        activePrimarySession = sessionID;
+        await pushEvent("agent:active", {
+          agent: agent,
+          sessionId: sessionID,
+          beadId: currentBeadId,
+        });
+      }
+
       if (injectedSessions.has(sessionID)) return;
 
       if (await isChildSession(client, sessionID)) {
@@ -1415,6 +1430,7 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
           const sessionID = props?.sessionID;
           if (typeof sessionID !== "string" || !sessionID) return;
 
+          // Handle subagent idle (existing behavior)
           const agentType = sessionToAgent.get(sessionID);
           if (agentType) {
             log(`Agent idle: ${agentType} (session: ${sessionID})`);
@@ -1426,6 +1442,19 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
               });
             }
             sessionToAgent.delete(sessionID);
+          }
+
+          // Handle primary agent idle (not a subagent, but a built-in agent like Build, Plan, etc.)
+          if (!sessionToAgent.has(sessionID) && currentAgentName && activePrimarySession === sessionID) {
+            log(`Primary agent idle: ${currentAgentName} (session: ${sessionID})`);
+            activePrimarySession = null;
+            if (serverReady) {
+              await pushEvent("agent:idle", {
+                agent: currentAgentName,
+                sessionId: sessionID,
+                beadId: currentBeadId,
+              });
+            }
           }
 
           if (serverReady) {

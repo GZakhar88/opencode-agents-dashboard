@@ -231,19 +231,19 @@ export interface BeadRemovedPayload extends BaseEventPayload {
   beadId: string;
 }
 
-/** agent:active — child agent session created and mapped to pipeline stage */
+/** agent:active — agent session started (subagent child session or primary built-in agent) */
 export interface AgentActivePayload extends BaseEventPayload {
   agent: string; // agent name
   sessionId: string;
-  parentSessionId: string;
-  beadId: string;
+  parentSessionId?: string; // present for subagent sessions, absent for primary agents
+  beadId: string | null;
 }
 
-/** agent:idle — child agent session finished work */
+/** agent:idle — agent session finished work (subagent or primary built-in agent) */
 export interface AgentIdlePayload extends BaseEventPayload {
   agent: string; // agent name
   sessionId: string;
-  beadId: string;
+  beadId: string | null;
 }
 
 /** beads:refreshed — summary after bead state refresh */

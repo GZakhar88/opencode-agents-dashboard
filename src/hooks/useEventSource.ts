@@ -137,6 +137,7 @@ export function useEventSource(
       "beads:refreshed",
       "pipeline:started",
       "pipeline:done",
+      "columns:update",
     ];
 
     const handleSSEEvent = (e: MessageEvent) => {

@@ -20,6 +20,7 @@ import {
   currentMessageId,
   reset,
   clients,
+  setClientCountChangeCallback,
 } from "./sse";
 
 function cleanup() {
@@ -243,5 +244,137 @@ describe("SSE clientCount", () => {
     stream.getReader();
 
     expect(clientCount()).toBe(1);
+  });
+});
+
+describe("SSE setClientCountChangeCallback", () => {
+  beforeEach(cleanup);
+
+  it("fires callback on client connect via createSSEResponse", async () => {
+    let callCount = 0;
+    setClientCountChangeCallback(() => { callCount++; });
+
+    const res = createSSEResponse(
+      () => [],
+      () => ({ projects: [] }),
+      null,
+      () => ({})
+    );
+
+    const reader = res.body!.getReader();
+    await reader.read(); // wait for start() to run
+
+    expect(callCount).toBe(1);
+
+    reader.cancel();
+  });
+
+  it("fires callback on client disconnect via cancel", async () => {
+    let callCount = 0;
+
+    const res = createSSEResponse(
+      () => [],
+      () => ({ projects: [] }),
+      null,
+      () => ({})
+    );
+
+    const reader = res.body!.getReader();
+    await reader.read(); // wait for start() to complete
+
+    // Now set callback after connect so we only count disconnect
+    setClientCountChangeCallback(() => { callCount++; });
+
+    await reader.cancel(); // triggers cancel()
+
+    expect(callCount).toBe(1);
+  });
+
+  it("fires callback when broadcast removes failed clients", () => {
+    let callCount = 0;
+    setClientCountChangeCallback(() => { callCount++; });
+
+    const brokenController = {
+      enqueue() {
+        throw new Error("Client disconnected");
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+
+    clients.add({ controller: brokenController, connectedAt: Date.now() });
+    expect(clientCount()).toBe(1);
+
+    broadcast("test:event", {});
+
+    expect(clientCount()).toBe(0);
+    expect(callCount).toBe(1);
+  });
+
+  it("does not throw when no callback is set (null-safe)", () => {
+    // reset() clears the callback, so none is set
+    const brokenController = {
+      enqueue() {
+        throw new Error("Client disconnected");
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+
+    clients.add({ controller: brokenController, connectedAt: Date.now() });
+
+    // Should not throw
+    expect(() => broadcast("test:event", {})).not.toThrow();
+    expect(clientCount()).toBe(0);
+  });
+
+  it("reset clears the callback", () => {
+    let callCount = 0;
+    setClientCountChangeCallback(() => { callCount++; });
+
+    reset();
+
+    // After reset, adding a broken client and broadcasting should not invoke the callback
+    const brokenController = {
+      enqueue() {
+        throw new Error("Client disconnected");
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+
+    clients.add({ controller: brokenController, connectedAt: Date.now() });
+    broadcast("test:event", {});
+
+    expect(callCount).toBe(0);
+  });
+
+  it("callback throwing does not disrupt broadcast to remaining clients", () => {
+    setClientCountChangeCallback(() => { throw new Error("callback boom"); });
+
+    const received: string[] = [];
+
+    // Add a broken client first
+    const brokenController = {
+      enqueue() {
+        throw new Error("Client disconnected");
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+    clients.add({ controller: brokenController, connectedAt: Date.now() });
+
+    // Add a working client
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        clients.add({ controller, connectedAt: Date.now() });
+        const orig = controller.enqueue.bind(controller);
+        controller.enqueue = (chunk: Uint8Array) => {
+          received.push(new TextDecoder().decode(chunk));
+          orig(chunk);
+        };
+      },
+    });
+    const reader = stream.getReader();
+
+    // Should not throw, and should still deliver to the working client
+    expect(() => broadcast("test:event", { key: "value" })).not.toThrow();
+    expect(clientCount()).toBe(1); // broken removed, working remains
+    expect(received.length).toBe(1);
+    expect(received[0]).toContain("event: test:event");
+
+    reader.cancel();
   });
 });

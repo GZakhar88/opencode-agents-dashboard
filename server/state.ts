@@ -56,10 +56,25 @@ interface SerializedDashboardState {
   projects: [string, SerializedProjectState][];
 }
 
-// --- Constants for dynamic column creation ---
+// --- Constants for dynamic column creation & visibility ---
 
 /** Stages that are bookends and should never get dynamic columns */
 const BOOKEND_STAGES = new Set(["ready", "done", "error"]);
+
+/** Bookend column IDs that are always visible */
+const ALWAYS_VISIBLE_COLUMNS = BOOKEND_STAGES;
+
+/** Pipeline stage IDs — all pipeline agent columns including orchestrator */
+const PIPELINE_STAGE_IDS = new Set([
+  "orchestrator",
+  "pipeline-builder",
+  "pipeline-refactor",
+  "pipeline-reviewer",
+  "pipeline-committer",
+]);
+
+/** Grace period in milliseconds before hiding pipeline columns */
+const PIPELINE_HIDE_GRACE_MS = 30_000;
 
 /** Pipeline agent IDs with their fixed order */
 const PIPELINE_AGENT_ORDER: Record<string, number> = {
@@ -248,6 +263,23 @@ export class StateManager {
    */
   private activeAgents: Map<string, Set<string>> = new Map();
 
+  /**
+   * In-memory grace-period timers for pipeline column hiding.
+   * When pipeline columns transition from visible → should-hide, a 30s timer
+   * is started. If pipeline activity resumes, the timer is cancelled.
+   * Keyed by projectPath.
+   */
+  private pipelineHideTimers: Map<
+    string,
+    ReturnType<typeof setTimeout>
+  > = new Map();
+
+  /**
+   * Tracks the last visible column key per project to avoid unnecessary broadcasts.
+   * Keyed by projectPath. Value is a joined string of visible column IDs.
+   */
+  private _lastVisibleColumnsKey: Map<string, string> = new Map();
+
   /** Listeners called after every state mutation (for SSE broadcasting) */
   private listeners: Array<(event: string, data: unknown) => void> = [];
 
@@ -304,6 +336,7 @@ export class StateManager {
         pipelines,
         lastBeadSnapshot: project.lastBeadSnapshot,
         columns: project.columns,
+        visibleColumns: this.computeVisibleColumns(project),
         activeAgents: Array.from(
           this.activeAgents.get(project.projectPath) || []
         ),
@@ -399,6 +432,189 @@ export class StateManager {
       this.activeAgents.set(projectPath, agents);
     }
     return agents;
+  }
+
+  // --- Column Visibility ---
+
+  /**
+   * Check if any bead across all pipelines has a stage matching any of
+   * the given stage IDs.
+   */
+  anyBeadInStages(project: ProjectState, stageIds: Set<string>): boolean {
+    for (const [, pipeline] of project.pipelines) {
+      for (const [, bead] of pipeline.beads) {
+        if (stageIds.has(bead.stage)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Determine whether the pipeline group should be visible, considering
+   * active agents, bead stages, and grace period timers.
+   *
+   * This is a pure read — it does NOT start or cancel timers.
+   * Timer management is done in broadcastColumnsUpdate.
+   */
+  private isPipelineVisible(project: ProjectState): boolean {
+    const activeAgents = this.getActiveAgents(project.projectPath);
+    const orchestratorActive = activeAgents.has("orchestrator");
+    const anyBeadInPipeline = this.anyBeadInStages(project, PIPELINE_STAGE_IDS);
+
+    if (orchestratorActive || anyBeadInPipeline) {
+      return true;
+    }
+
+    // Check if any pipeline columns actually exist in the project
+    const hasPipelineColumns = project.columns.some(
+      (col) => col.group === "pipeline"
+    );
+    if (!hasPipelineColumns) {
+      return false;
+    }
+
+    // Pipeline should hide — but is a grace period timer running?
+    return this.pipelineHideTimers.has(project.projectPath);
+  }
+
+  /**
+   * Compute the set of visible columns for a project based on:
+   * 1. Bookend columns (ready, done, error) are always visible
+   * 2. Pipeline group: visible when orchestrator is active OR any bead
+   *    occupies a pipeline stage OR grace period timer is running.
+   *    Show/hide as a unit.
+   * 3. Standalone columns: visible when their agent is active OR any bead
+   *    occupies that column's stage.
+   *
+   * This is a pure read with no side effects (does not start timers).
+   * Returns columns sorted by order.
+   */
+  computeVisibleColumns(project: ProjectState): ColumnConfig[] {
+    const activeAgents = this.getActiveAgents(project.projectPath);
+    const pipelineVisible = this.isPipelineVisible(project);
+
+    const visible: ColumnConfig[] = [];
+
+    for (const col of project.columns) {
+      // 1. Always include bookend columns
+      if (ALWAYS_VISIBLE_COLUMNS.has(col.id)) {
+        visible.push(col);
+        continue;
+      }
+
+      // 2. Pipeline group columns — show/hide as a unit
+      if (col.group === "pipeline") {
+        if (pipelineVisible) {
+          visible.push(col);
+        }
+        continue;
+      }
+
+      // 3. Standalone columns — show if agent active OR any bead in that stage
+      const agentActive = activeAgents.has(col.id);
+      const beadInStage = this.anyBeadInStages(
+        project,
+        new Set([col.id])
+      );
+      if (agentActive || beadInStage) {
+        visible.push(col);
+      }
+    }
+
+    // Sort by order
+    visible.sort((a, b) => a.order - b.order);
+    return visible;
+  }
+
+  /**
+   * Manage grace period timers for pipeline column hiding.
+   *
+   * Called by broadcastColumnsUpdate when pipeline state changes.
+   * - If pipeline is active: cancel any pending hide timer
+   * - If pipeline should hide and was previously visible: start grace timer
+   * - If pipeline was never visible: no timer needed
+   */
+  private managePipelineGracePeriod(project: ProjectState): void {
+    const activeAgents = this.getActiveAgents(project.projectPath);
+    const projectPath = project.projectPath;
+    const orchestratorActive = activeAgents.has("orchestrator");
+    const anyBeadInPipeline = this.anyBeadInStages(project, PIPELINE_STAGE_IDS);
+    const pipelineShouldBeActive = orchestratorActive || anyBeadInPipeline;
+
+    const existingTimer = this.pipelineHideTimers.get(projectPath);
+
+    if (pipelineShouldBeActive) {
+      // Pipeline is active — cancel any pending hide timer
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        this.pipelineHideTimers.delete(projectPath);
+      }
+      return;
+    }
+
+    // Pipeline should hide — do we need a grace period?
+    if (existingTimer) {
+      // Timer already running — let it continue
+      return;
+    }
+
+    // Check if pipeline was previously visible (had a key with pipeline cols)
+    const lastKey = this._lastVisibleColumnsKey.get(projectPath) || "";
+    const wasPipelineVisible = [...PIPELINE_STAGE_IDS].some((id) =>
+      lastKey.split(",").includes(id)
+    );
+
+    if (wasPipelineVisible) {
+      // Transition from visible → should-hide: start grace period
+      const timer = setTimeout(() => {
+        this.pipelineHideTimers.delete(projectPath);
+        // Clear the last key so managePipelineGracePeriod doesn't
+        // think pipeline was previously visible and start another timer.
+        this._lastVisibleColumnsKey.delete(projectPath);
+        // Grace period elapsed — recompute and broadcast
+        this.broadcastColumnsUpdate(project);
+      }, PIPELINE_HIDE_GRACE_MS);
+      // Don't block process exit
+      if (timer && typeof timer === "object" && "unref" in timer) {
+        timer.unref();
+      }
+      this.pipelineHideTimers.set(projectPath, timer);
+    }
+  }
+
+  /**
+   * Recompute visible columns for a project and track whether they changed.
+   * If the visible set changed, updates the tracking key and notifies listeners.
+   * Also manages grace period timers for pipeline column hiding.
+   *
+   * Returns true if the visible columns changed, false otherwise.
+   */
+  broadcastColumnsUpdate(project: ProjectState): boolean {
+    // Manage grace period timers BEFORE computing visible columns,
+    // so that computeVisibleColumns sees the correct timer state.
+    this.managePipelineGracePeriod(project);
+
+    const visible = this.computeVisibleColumns(project);
+    const newKey = visible.map((c) => c.id).join(",");
+    const oldKey = this._lastVisibleColumnsKey.get(project.projectPath) || "";
+
+    if (newKey === oldKey) {
+      return false;
+    }
+
+    this._lastVisibleColumnsKey.set(project.projectPath, newKey);
+
+    // Notify listeners about column visibility change
+    for (const listener of this.listeners) {
+      listener("columns:visibility", {
+        projectPath: project.projectPath,
+        visibleColumns: visible,
+      });
+    }
+
+    return true;
   }
 
   // --- Event Processing ---
@@ -560,6 +776,9 @@ export class StateManager {
     }
     this.schedulePersist();
 
+    // Recompute column visibility (bead claimed → stage changed)
+    this.broadcastColumnsUpdate(project);
+
     return {
       event: "bead:claimed",
       data: {
@@ -594,6 +813,9 @@ export class StateManager {
       createDynamicColumn(project, stage);
     }
     this.schedulePersist();
+
+    // Recompute column visibility (bead stage changed)
+    this.broadcastColumnsUpdate(project);
 
     return {
       event: "bead:stage",
@@ -633,6 +855,9 @@ export class StateManager {
       this.updateBeadInSnapshot(project, beadRecord);
     }
     this.schedulePersist();
+
+    // Recompute column visibility (bead done → may affect pipeline visibility)
+    this.broadcastColumnsUpdate(project);
 
     return {
       event: "bead:done",
@@ -687,6 +912,9 @@ export class StateManager {
       this.updateBeadInSnapshot(project, beadRecord);
     }
     this.schedulePersist();
+
+    // Recompute column visibility (bead error → may affect column visibility)
+    this.broadcastColumnsUpdate(project);
 
     return {
       event: "bead:error",
@@ -800,6 +1028,9 @@ export class StateManager {
     }
     this.schedulePersist();
 
+    // Recompute column visibility (bead removed → may affect column visibility)
+    this.broadcastColumnsUpdate(project);
+
     return {
       event: "bead:removed",
       data: {
@@ -836,6 +1067,9 @@ export class StateManager {
       agents.add(agentName);
     }
 
+    // Recompute column visibility (agent became active → may show columns)
+    this.broadcastColumnsUpdate(project);
+
     return {
       event: "agent:active",
       data: {
@@ -869,6 +1103,9 @@ export class StateManager {
         agents.delete(agentName);
       }
     }
+
+    // Recompute column visibility (agent went idle → may hide columns)
+    this.broadcastColumnsUpdate(project);
 
     return {
       event: "agent:idle",
@@ -949,12 +1186,16 @@ export class StateManager {
       this.schedulePersist();
     }
 
+    // Recompute column visibility (columns changed)
+    this.broadcastColumnsUpdate(project);
+
     return {
       event: "columns:update",
       data: {
         ...data,
         projectPath: project.projectPath,
         columns: project.columns,
+        visibleColumns: this.computeVisibleColumns(project),
       },
     };
   }
@@ -1157,12 +1398,24 @@ export class StateManager {
   destroy(): void {
     this.persistNow();
     this.listeners = [];
+    // Clear all pipeline hide timers
+    for (const timer of this.pipelineHideTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pipelineHideTimers.clear();
+    this._lastVisibleColumnsKey.clear();
   }
 
   /** Reset all state (for testing) */
   clear(): void {
     this.state = { projects: new Map() };
     this.activeAgents.clear();
+    // Clear all pipeline hide timers
+    for (const timer of this.pipelineHideTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pipelineHideTimers.clear();
+    this._lastVisibleColumnsKey.clear();
     if (this.persistDebounceTimer) {
       clearTimeout(this.persistDebounceTimer);
       this.persistDebounceTimer = null;

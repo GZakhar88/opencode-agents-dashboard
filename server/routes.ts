@@ -51,6 +51,36 @@ const MIME_TYPES: Record<string, string> = {
 /** Central state manager — processes events and persists to disk */
 export const stateManager = new StateManager();
 
+// --- Column Visibility → SSE Bridge ---
+
+/**
+ * Listen for column visibility changes from the StateManager and broadcast
+ * them as `columns:update` SSE events to all connected dashboard frontends.
+ *
+ * The StateManager emits `columns:visibility` events (via its onEvent listener
+ * mechanism) whenever broadcastColumnsUpdate() detects that the visible column
+ * set has changed. This bridge forwards those events to SSE clients so the
+ * frontend can update its column layout in real time.
+ *
+ * The StateManager already handles:
+ * - Deduplication (only emits when visible set actually changes)
+ * - Grace period timers for pipeline column hiding
+ * - Only triggering on column-affecting events (bead:stage, bead:done, etc.)
+ */
+const _unsubscribeColumnsListener = stateManager.onEvent((event, data) => {
+  if (event === "columns:visibility") {
+    const { projectPath, visibleColumns } = data as {
+      projectPath: string;
+      visibleColumns: unknown[];
+    };
+    broadcast("columns:update", {
+      projectPath,
+      visibleColumns,
+      _serverTimestamp: Date.now(),
+    });
+  }
+});
+
 // --- Plugin Registry ---
 
 interface PluginRecord {

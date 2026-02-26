@@ -6,14 +6,23 @@
  *   connected    → green
  *   reconnecting → yellow/amber (pulsing)
  *   disconnected → red
+ *
+ * Supports compact mode (dot-only) for mobile header.
  */
 
 import type { ConnectionStatus } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface StatusIndicatorProps {
   status: ConnectionStatus;
+  /** When true, renders a dot-only indicator (mobile header) */
+  compact?: boolean;
 }
 
 const STATUS_CONFIG: Record<
@@ -42,8 +51,28 @@ const STATUS_CONFIG: Record<
   },
 };
 
-export function StatusIndicator({ status }: StatusIndicatorProps) {
+export function StatusIndicator({ status, compact = false }: StatusIndicatorProps) {
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.disconnected;
+
+  if (compact) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex h-[44px] w-[44px] items-center justify-center"
+            aria-label={`Connection status: ${config.label}`}
+            role="status"
+            tabIndex={0}
+          >
+            <span className={cn("h-2.5 w-2.5 rounded-full", config.dot)} />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {config.label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   return (
     <Badge variant="outline" className={cn("gap-1.5 font-mono text-[11px]", config.className)}>

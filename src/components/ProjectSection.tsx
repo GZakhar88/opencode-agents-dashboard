@@ -38,6 +38,8 @@ interface ProjectSectionProps {
   isCompleted?: boolean;
   /** Whether this project is in the stale bucket (disconnected > 1h) */
   isStale?: boolean;
+  /** Whether the viewport is mobile (< 640px) */
+  isMobile?: boolean;
 }
 
 /**
@@ -78,7 +80,7 @@ function getBeadSummary(project: ProjectState) {
   return { total, active, done, error };
 }
 
-export function ProjectSection({ project, isCompleted = false, isStale = false }: ProjectSectionProps) {
+export function ProjectSection({ project, isCompleted = false, isStale = false, isMobile = false }: ProjectSectionProps) {
   const [isOpen, setIsOpen] = useState(true);
   const pipelines = Array.from(project.pipelines.values());
   const cardStatus = getCardStatus(project);
@@ -137,7 +139,8 @@ export function ProjectSection({ project, isCompleted = false, isStale = false }
             type="button"
             aria-expanded={isOpen}
             className={cn(
-              "flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-accent/30",
+              "flex w-full items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-accent/30 sm:px-4",
+              "min-h-[44px]",
               FOCUS_RING,
             )}
           >
@@ -215,7 +218,7 @@ export function ProjectSection({ project, isCompleted = false, isStale = false }
 
         {/* Pipeline content */}
         <CollapsibleContent>
-          <div className="border-t border-border/50 px-4 pb-4 pt-2">
+          <div className="border-t border-border/50 px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
             {pipelines.length === 0 ? (
               <p className="py-4 text-center text-xs text-muted-foreground">
                 No active pipelines
@@ -224,24 +227,28 @@ export function ProjectSection({ project, isCompleted = false, isStale = false }
               pipelines.map((pipeline, index) => (
                 <div key={pipeline.id}>
                   {index > 0 && <Separator className="my-3" />}
+                  {/* On mobile: no expand toggle, always show progress bar only */}
                   <PipelineHeader 
                     pipeline={pipeline}
-                    isExpanded={expandedPipelines.has(pipeline.id)}
+                    isExpanded={!isMobile && expandedPipelines.has(pipeline.id)}
                     onToggle={() => togglePipeline(pipeline.id)}
+                    hideToggle={isMobile}
                   />
-                  {/* Collapsed view: segmented progress bar */}
-                  {!expandedPipelines.has(pipeline.id) && (
+                  {/* Collapsed view: segmented progress bar (always on mobile) */}
+                  {(isMobile || !expandedPipelines.has(pipeline.id)) && (
                     <PipelineProgress
                       pipeline={pipeline}
                       columns={project.columns}
                     />
                   )}
-                  {/* Expanded view: filtered Kanban board */}
-                  <Board 
-                    pipeline={pipeline}
-                    isExpanded={expandedPipelines.has(pipeline.id)}
-                    columns={project.columns}
-                  />
+                  {/* Expanded view: filtered Kanban board (desktop only) */}
+                  {!isMobile && (
+                    <Board 
+                      pipeline={pipeline}
+                      isExpanded={expandedPipelines.has(pipeline.id)}
+                      columns={project.columns}
+                    />
+                  )}
                 </div>
               ))
             )}
@@ -275,7 +282,7 @@ function ConnectionBadge({
         className="shrink-0 gap-1.5 font-mono text-[11px] border-status-live/50 bg-status-live/10 text-status-live"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-status-live" />
-        Connected
+        <span className="hidden sm:inline">Connected</span>
       </Badge>
     );
   }
@@ -283,9 +290,9 @@ function ConnectionBadge({
   return (
     <Badge
       variant="outline"
-      className="shrink-0 gap-1.5 font-mono text-[11px] border-status-error/50 bg-status-error/10 text-status-error"
+      className="shrink-0 gap-1.5 whitespace-nowrap font-mono text-[11px] border-status-error/50 bg-status-error/10 text-status-error"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-status-error" />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-error" />
       <span className="hidden sm:inline">Disconnected ·</span> {formatLastSeen(lastHeartbeat)}
     </Badge>
   );

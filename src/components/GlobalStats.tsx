@@ -69,7 +69,7 @@ export function GlobalStats({ projects }: GlobalStatsProps) {
   }
 
   return (
-    <div className="flex items-center gap-1" role="status" aria-label="Dashboard statistics">
+    <div className="flex flex-wrap items-center gap-1" role="status" aria-label="Dashboard statistics">
       <StatChip
         icon={Activity}
         value={stats.activeProjects}

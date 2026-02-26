@@ -19,6 +19,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type { ProjectState } from "@shared/types";
 import { useEventSource } from "@/hooks/useEventSource";
 import { useBoardState } from "@/hooks/useBoardState";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { MotionConfig } from "framer-motion";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ReconnectBanner } from "@/components/ReconnectBanner";
@@ -27,7 +28,7 @@ import { GlobalStats } from "@/components/GlobalStats";
 import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Link2Off, ServerOff, Eye, EyeOff, ChevronDown, Clock, ChevronRight } from "lucide-react";
+import { Link2Off, ServerOff, Eye, EyeOff, ChevronDown, Clock, ChevronRight, Activity } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +94,7 @@ function projectSortWeight(project: ProjectState, now: number): number {
  */
 function DashboardApp() {
   const { state, dispatch } = useBoardState();
+  const isMobile = useIsMobile();
 
   const { status, reconnect } = useEventSource({
     onEvent: dispatch,
@@ -194,20 +196,27 @@ function DashboardApp() {
         <div className="min-h-screen bg-background">
           {/* Command bar header */}
           <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="flex items-center gap-4 px-4 py-2.5 sm:px-6">
+            <div className="flex items-center gap-4 px-3 py-2.5 sm:px-6">
               {/* Logo + title — compact */}
               <h1 className="shrink-0 text-sm font-bold tracking-tight text-foreground">
                 OpenCode<span className="hidden sm:inline font-normal text-muted-foreground/70"> Dashboard</span>
               </h1>
 
-              {/* Vertical divider */}
+              {/* Vertical divider — hidden on mobile */}
               <div className="hidden h-4 w-px bg-border sm:block" />
 
-              {/* Aggregate stats */}
-              <GlobalStats projects={projects} />
+              {/* Aggregate stats — hidden on mobile (revealed via MobileStatsToggle) */}
+              <div className="hidden sm:flex">
+                <GlobalStats projects={projects} />
+              </div>
 
               {/* Spacer */}
               <div className="flex-1" />
+
+              {/* Mobile stats toggle — visible only on mobile */}
+              {isMobile && (
+                <MobileStatsToggle projects={projects} />
+              )}
 
               {/* Completed projects filter — compact dropdown-style toggle */}
               {completedProjects.length > 0 && (
@@ -218,8 +227,8 @@ function DashboardApp() {
                 />
               )}
 
-              {/* Connection status */}
-              <StatusIndicator status={status} />
+              {/* Connection status — dot-only on mobile, full badge on desktop */}
+              <StatusIndicator status={status} compact={isMobile} />
             </div>
           </header>
 
@@ -227,7 +236,7 @@ function DashboardApp() {
           <ReconnectBanner status={status} onReconnect={reconnect} />
 
           {/* Main content */}
-          <main className="px-6 py-6">
+          <main className="px-3 py-4 sm:px-6 sm:py-6">
             {isInitialLoad && <LoadingSkeleton />}
 
             {isPermanentlyDisconnected && (
@@ -245,6 +254,7 @@ function DashboardApp() {
                     key={project.projectPath}
                     project={project}
                     isCompleted={isProjectCompleted(project)}
+                    isMobile={isMobile}
                   />
                 ))}
               </div>
@@ -256,6 +266,7 @@ function DashboardApp() {
                 projects={sortedStaleProjects}
                 showStale={showStale}
                 onToggle={() => setShowStale(!showStale)}
+                isMobile={isMobile}
               />
             )}
           </main>
@@ -275,10 +286,12 @@ function StaleProjectsFooter({
   projects,
   showStale,
   onToggle,
+  isMobile,
 }: {
   projects: ProjectState[];
   showStale: boolean;
   onToggle: () => void;
+  isMobile: boolean;
 }) {
   const count = projects.length;
 
@@ -290,6 +303,7 @@ function StaleProjectsFooter({
         onClick={onToggle}
         className={cn(
           "group mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/50 hover:text-muted-foreground",
+          "min-h-[44px] sm:min-h-0",
           FOCUS_RING,
         )}
         aria-expanded={showStale}
@@ -316,8 +330,66 @@ function StaleProjectsFooter({
               project={project}
               isCompleted={isProjectCompleted(project)}
               isStale
+              isMobile={isMobile}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * MobileStatsToggle — Tap-to-reveal stats for mobile header.
+ *
+ * Shows a small info button that expands to reveal GlobalStats
+ * in a dropdown panel. Collapses automatically on outside tap.
+ */
+function MobileStatsToggle({ projects }: { projects: ProjectState[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside tap or Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: Event) => {
+      const target = (e as TouchEvent).touches?.[0]?.target ?? e.target;
+      if (ref.current && !ref.current.contains(target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside, { passive: true });
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={cn(
+          "inline-flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          isOpen && "bg-accent text-foreground",
+          FOCUS_RING,
+        )}
+        aria-expanded={isOpen}
+        aria-label="Show dashboard statistics"
+      >
+        <Activity className="h-4 w-4" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full z-20 mt-1.5 max-w-[calc(100vw-1.5rem)] rounded-lg border border-border bg-popover p-3 shadow-lg shadow-black/20">
+          <GlobalStats projects={projects} />
         </div>
       )}
     </div>
@@ -374,6 +446,7 @@ function DisconnectedState({ onReconnect }: { onReconnect: () => void }) {
         onClick={onReconnect}
         className={cn(
           "inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent",
+          "min-h-[44px]",
           FOCUS_RING,
         )}
       >
@@ -401,11 +474,12 @@ function CompletedToggle({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Close dropdown on outside click or Escape key
+  // Close dropdown on outside click/tap or Escape key
   useEffect(() => {
     if (!isDropdownOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+    const handleClickOutside = (e: Event) => {
+      const target = (e as TouchEvent).touches?.[0]?.target ?? e.target;
+      if (dropdownRef.current && !dropdownRef.current.contains(target as Node)) {
         setIsDropdownOpen(false);
       }
     };
@@ -415,9 +489,11 @@ function CompletedToggle({
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside, { passive: true });
     document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
   }, [isDropdownOpen]);
@@ -429,6 +505,7 @@ function CompletedToggle({
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          "min-h-[44px] sm:min-h-0",
           showCompleted && "border-status-live/30 text-foreground",
           FOCUS_RING,
         )}
@@ -473,6 +550,7 @@ function CompletedToggle({
             }}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors hover:bg-accent",
+              "min-h-[44px] sm:min-h-0",
               !showCompleted && "bg-accent/50 text-foreground",
               FOCUS_RING,
             )}
@@ -493,6 +571,7 @@ function CompletedToggle({
             }}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors hover:bg-accent",
+              "min-h-[44px] sm:min-h-0",
               showCompleted && "bg-accent/50 text-foreground",
               FOCUS_RING,
             )}

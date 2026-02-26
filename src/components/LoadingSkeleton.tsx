@@ -3,6 +3,8 @@
  *
  * Mimics the layout of the project card grid to avoid layout shift
  * when data loads. Shows 3 skeleton cards in the responsive grid.
+ *
+ * On mobile (< 640px), shows progress bar skeleton instead of board columns.
  */
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +19,7 @@ export function LoadingSkeleton() {
           data-status="idle"
         >
           {/* Card header skeleton */}
-          <div className="flex items-center gap-3 px-4 py-3.5">
+          <div className="flex items-center gap-3 px-3 py-3.5 sm:px-4">
             <Skeleton className="h-4 w-4 shrink-0" />
             <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
             <div className="min-w-0 flex-1 space-y-1.5">
@@ -28,16 +30,21 @@ export function LoadingSkeleton() {
           </div>
 
           {/* Pipeline content skeleton */}
-          <div className="border-t border-border/50 px-4 pb-4 pt-2">
+          <div className="border-t border-border/50 px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
             {/* Pipeline header */}
             <div className="flex items-center gap-3 py-2">
-              <Skeleton className="h-6 w-16 rounded" />
+              <Skeleton className="hidden h-6 w-16 rounded sm:block" />
               <Skeleton className="h-4 w-24" />
               <Skeleton className="h-5 w-12 rounded-full" />
             </div>
 
-            {/* Board columns */}
-            <div className="flex gap-3 overflow-x-auto scrollbar-thin">
+            {/* Mobile: progress bar skeleton */}
+            <div className="sm:hidden">
+              <Skeleton className="h-2 w-full rounded-full" />
+            </div>
+
+            {/* Desktop: Board columns */}
+            <div className="hidden gap-3 overflow-x-auto scrollbar-thin sm:flex">
               {Array.from({ length: cardIndex === 0 ? 4 : 3 }).map((_, colIndex) => (
                 <div
                   key={colIndex}

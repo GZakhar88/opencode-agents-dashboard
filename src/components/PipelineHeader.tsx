@@ -19,6 +19,8 @@ interface PipelineHeaderProps {
   pipeline: Pipeline;
   isExpanded: boolean;
   onToggle: () => void;
+  /** When true, hides the expand/collapse toggle button (mobile) */
+  hideToggle?: boolean;
 }
 
 const STATUS_CONFIG: Record<
@@ -39,36 +41,39 @@ const STATUS_CONFIG: Record<
   },
 };
 
-export function PipelineHeader({ pipeline, isExpanded, onToggle }: PipelineHeaderProps) {
+export function PipelineHeader({ pipeline, isExpanded, onToggle, hideToggle = false }: PipelineHeaderProps) {
   const config = STATUS_CONFIG[pipeline.status] ?? STATUS_CONFIG.idle;
 
   return (
-    <div className="flex items-center gap-3 py-2">
-      {/* Expand/collapse toggle button */}
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          "flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-          FOCUS_RING,
-        )}
-        aria-label={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
-        title={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
-      >
-        {isExpanded ? (
-          <>
-            <ChevronUp className="h-3 w-3" />
-            <BarChart3 className="h-3 w-3" />
-            <span>Collapse</span>
-          </>
-        ) : (
-          <>
-            <ChevronDown className="h-3 w-3" />
-            <Layers className="h-3 w-3" />
-            <span>Expand</span>
-          </>
-        )}
-      </button>
+    <div className="flex items-center gap-2 py-2 sm:gap-3">
+      {/* Expand/collapse toggle button — hidden on mobile */}
+      {!hideToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className={cn(
+            "flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "min-h-[44px] sm:min-h-0",
+            FOCUS_RING,
+          )}
+          aria-label={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
+          title={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" />
+              <BarChart3 className="h-3 w-3" />
+              <span>Collapse</span>
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" />
+              <Layers className="h-3 w-3" />
+              <span>Expand</span>
+            </>
+          )}
+        </button>
+      )}
       <h3 className="text-sm font-medium text-foreground">
         {pipeline.title}
       </h3>

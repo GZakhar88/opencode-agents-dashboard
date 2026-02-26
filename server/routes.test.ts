@@ -531,12 +531,16 @@ describe("GET /api/health", () => {
       uptime: number;
       plugins: number;
       sseClients: number;
+      buildHash: string;
     };
     expect(data.status).toBe("ok");
     expect(typeof data.uptime).toBe("number");
     expect(data.uptime).toBeGreaterThanOrEqual(0);
     expect(typeof data.plugins).toBe("number");
     expect(typeof data.sseClients).toBe("number");
+    // Build hash: 12-character hex string
+    expect(typeof data.buildHash).toBe("string");
+    expect(data.buildHash).toMatch(/^[0-9a-f]{12}$/);
   });
 
   it("reflects registered plugin count", async () => {

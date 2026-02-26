@@ -24,6 +24,12 @@ import {
   reset as resetSSE,
 } from "./sse";
 import { join } from "path";
+import { computeBuildHash } from "../shared/version";
+
+// --- Build Hash ---
+
+/** Computed once at module load time (same process as server/index.ts) */
+const buildHash = computeBuildHash();
 
 // --- Static File Serving ---
 
@@ -408,6 +414,7 @@ function handleHealth(origin?: string | null): Response {
       uptime: Math.floor((Date.now() - startTime) / 1000),
       plugins: plugins.size,
       sseClients: clientCount(),
+      buildHash,
     },
     200,
     origin

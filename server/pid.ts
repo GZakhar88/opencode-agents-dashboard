@@ -18,6 +18,7 @@ export interface PidFileData {
   pid: number;
   port: number;
   startedAt: string; // ISO timestamp
+  buildHash?: string; // 12-char hex hash of source files (optional for backward compat)
 }
 
 // --- PID file path ---
@@ -36,7 +37,7 @@ export function getPidFilePath(): string {
  * Write PID file when the server starts.
  * Creates the directory if it doesn't exist.
  */
-export function writePid(pid: number, port: number): void {
+export function writePid(pid: number, port: number, buildHash?: string): void {
   if (!existsSync(PID_DIR)) {
     mkdirSync(PID_DIR, { recursive: true });
   }
@@ -44,6 +45,7 @@ export function writePid(pid: number, port: number): void {
     pid,
     port,
     startedAt: new Date().toISOString(),
+    ...(buildHash ? { buildHash } : {}),
   };
   writeFileSync(PID_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
@@ -71,12 +73,19 @@ export function readPid(): PidFileData | null {
 
 /**
  * Remove PID file on graceful shutdown or after stopping the server.
+ *
+ * When `ownPid` is provided, the file is only deleted if it still belongs
+ * to that process. This prevents a shutting-down server from accidentally
+ * removing a *new* server's PID file written during a restart race.
  */
-export function removePid(): void {
+export function removePid(ownPid?: number): void {
   try {
-    if (existsSync(PID_FILE)) {
-      unlinkSync(PID_FILE);
+    if (!existsSync(PID_FILE)) return;
+    if (ownPid !== undefined) {
+      const current = readPid();
+      if (current && current.pid !== ownPid) return; // PID file belongs to a newer server
     }
+    unlinkSync(PID_FILE);
   } catch {
     // Ignore errors (file may already be gone)
   }

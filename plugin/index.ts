@@ -20,6 +20,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
+import { computeBuildHash } from "../shared/version";
 import { isServerRunning, readPid, writePid, removePid } from "../server/pid";
 import { join, resolve } from "path";
 import { readdir, readFile, copyFile, mkdir, stat } from "fs/promises";
@@ -544,6 +545,26 @@ async function checkServerHealth(): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Get the server's build hash from the health endpoint.
+ * Returns null if the server doesn't report a hash or is unreachable.
+ */
+async function getServerBuildHash(port?: number): Promise<string | null> {
+  try {
+    const url = port
+      ? `http://localhost:${port}/api/health`
+      : serverUrl("/api/health");
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { buildHash?: string };
+    return data.buildHash ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -1123,10 +1144,46 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
   // Fire-and-forget: don't block plugin load / hook registration.
   (async () => {
     try {
-      const existing = await isServerRunning(true);
+      let existing = await isServerRunning(true);
       if (!existing) {
         log("No existing server found — staying dormant");
         return;
+      }
+
+      // Version check: compare server's build hash with current code on disk.
+      // If they differ, the server is running stale code and must be restarted.
+      const expectedHash = computeBuildHash();
+      const serverHash = await getServerBuildHash(existing.port);
+
+      if (serverHash && serverHash !== expectedHash) {
+        log(`Server code is stale (server: ${serverHash}, expected: ${expectedHash}) — restarting`);
+        // Kill the old server
+        try {
+          process.kill(existing.pid, "SIGTERM");
+          removePid();
+        } catch { /* ignore — process may already be gone */ }
+
+        // Wait briefly for the old server to die
+        await Bun.sleep(1000);
+
+        // Spawn a fresh server on the same port
+        const started = await spawnServer(existing.port);
+        if (!started) {
+          warn("Failed to restart server after detecting stale code");
+          return;
+        }
+        log("Server restarted with fresh code");
+
+        // Re-read PID data since we spawned a new server
+        existing = await isServerRunning(true);
+        if (!existing) {
+          warn("Server restarted but PID file not found");
+          return;
+        }
+      } else if (serverHash) {
+        log(`Server code is current (hash: ${serverHash})`);
+      } else {
+        log("Server does not report build hash — skipping version check");
       }
 
       log(`Found existing server (PID: ${existing.pid}, port: ${existing.port}) — auto-connecting`);

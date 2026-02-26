@@ -5,13 +5,16 @@
  *
  * Run: bun test server/routes.test.ts
  */
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import {
   handleRequest,
   plugins,
   broadcast,
   stateManager,
   resetSSE,
+  clearIdleTimer,
+  checkAndStartIdleTimer,
+  configureIdleShutdown,
 } from "./routes";
 import { clients as sseClients } from "./sse";
 
@@ -42,6 +45,7 @@ async function jsonBody(res: Response): Promise<unknown> {
 
 function cleanup() {
   plugins.clear();
+  clearIdleTimer();
   resetSSE();
   stateManager.clear();
 }
@@ -878,5 +882,369 @@ describe("integration: register -> event -> deregister", () => {
     const healthRes2 = await handleRequest(makeRequest("GET", "/api/health"));
     const health2 = (await jsonBody(healthRes2)) as { plugins: number };
     expect(health2.plugins).toBe(0);
+  });
+});
+
+// --- Idle Auto-Shutdown Tests ---
+
+describe("idle auto-shutdown", () => {
+  beforeEach(cleanup);
+  afterEach(cleanup);
+
+  it("configureIdleShutdown sets the timeout value", () => {
+    // Feature is enabled with a valid timeout
+    configureIdleShutdown(60_000);
+    // After configure, calling checkAndStartIdleTimer with no plugins/clients
+    // should start a timer (which we can verify by the log or by clearing it)
+    // We just verify it doesn't throw
+    expect(() => configureIdleShutdown(60_000)).not.toThrow();
+  });
+
+  it("checkAndStartIdleTimer does nothing when disabled (timeout <= 0)", () => {
+    configureIdleShutdown(0);
+    // Should not start any timer; must not throw
+    checkAndStartIdleTimer();
+    // Calling clear should also be safe (no timer to clear)
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does nothing when disabled (negative timeout)", () => {
+    configureIdleShutdown(-1);
+    checkAndStartIdleTimer();
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does not start timer when plugins exist", async () => {
+    configureIdleShutdown(100);
+    // Register a plugin so the server is NOT idle
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    await handleRequest(req);
+    expect(plugins.size).toBe(1);
+
+    // Should not start a timer (plugins exist)
+    checkAndStartIdleTimer();
+    // clearIdleTimer should be a no-op (no timer was started)
+    // We verify indirectly: no "cancelled" log would appear,
+    // but mainly that it doesn't throw
+    clearIdleTimer();
+  });
+
+  it("clearIdleTimer is safe to call when no timer is running", () => {
+    configureIdleShutdown(60_000);
+    // No timer started yet — should be a no-op
+    expect(() => clearIdleTimer()).not.toThrow();
+  });
+
+  it("handleRegister calls clearIdleTimer (cancels pending timer)", async () => {
+    configureIdleShutdown(60_000);
+    // Start a timer (no plugins, no clients)
+    checkAndStartIdleTimer();
+
+    const logSpy = spyOn(console, "log");
+
+    // Register a plugin — should cancel the timer
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    const res = await handleRequest(req);
+    expect(res.status).toBe(200);
+
+    // Verify timer cancellation was logged
+    const cancelLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("Idle timer cancelled")
+    );
+    expect(cancelLogs.length).toBe(1);
+
+    logSpy.mockRestore();
+    // Calling clearIdleTimer again should be a no-op
+    clearIdleTimer();
+  });
+
+  it("handleDeregister calls checkAndStartIdleTimer", async () => {
+    configureIdleShutdown(300_000);
+    // Register a plugin
+    const regReq = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "test-project",
+    });
+    const regRes = await handleRequest(regReq);
+    const { pluginId } = (await jsonBody(regRes)) as { pluginId: string };
+
+    const logSpy = spyOn(console, "log");
+
+    // Deregister — should trigger idle check and start timer
+    const delReq = makeRequest("DELETE", `/api/plugin/${pluginId}`);
+    const delRes = await handleRequest(delReq);
+    expect(delRes.status).toBe(200);
+    expect(plugins.size).toBe(0);
+
+    // Verify the timer was started (countdown message logged)
+    const startLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" && args[0].includes("Auto-shutdown in 300s")
+    );
+    expect(startLogs.length).toBe(1);
+
+    logSpy.mockRestore();
+    // Clean it up
+    clearIdleTimer();
+  });
+
+  it("checkAndStartIdleTimer does not start duplicate timers", () => {
+    configureIdleShutdown(60_000);
+    const logSpy = spyOn(console, "log");
+
+    // Start timer — should log the countdown message
+    checkAndStartIdleTimer();
+    const firstLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" && args[0].includes("Auto-shutdown")
+    );
+    expect(firstLogs.length).toBe(1);
+
+    // Calling again should be a no-op (already ticking) — no additional log
+    checkAndStartIdleTimer();
+    const allLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" && args[0].includes("Auto-shutdown")
+    );
+    expect(allLogs.length).toBe(1); // still just 1
+
+    logSpy.mockRestore();
+    // Cleanup
+    clearIdleTimer();
+  });
+
+  it("handleRegister cancels running idle timer before it fires", async () => {
+    // Use a very short timeout — but handleRegister should cancel it
+    // before the callback executes.
+    configureIdleShutdown(10); // 10ms
+
+    checkAndStartIdleTimer();
+
+    // Register a plugin — this calls clearIdleTimer(), cancelling the timer
+    const req = makeRequest("POST", "/api/plugin/register", {
+      projectPath: "/Users/test/project",
+      projectName: "race-guard-test",
+    });
+    await handleRequest(req);
+
+    // Mock require cache so if the timer fires anyway, it doesn't call real shutdown
+    const indexPath = require.resolve("./index");
+    const originalModule = require.cache[indexPath];
+    let shutdownCalled = false;
+    require.cache[indexPath] = {
+      id: indexPath,
+      filename: indexPath,
+      loaded: true,
+      exports: { shutdown: () => { shutdownCalled = true; } },
+    } as any;
+
+    try {
+      // Wait beyond the timer duration — it should NOT fire
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Timer was cancelled by handleRegister, so shutdown should NOT have been called
+      expect(shutdownCalled).toBe(false);
+      expect(plugins.size).toBe(1);
+    } finally {
+      if (originalModule) {
+        require.cache[indexPath] = originalModule;
+      } else {
+        delete require.cache[indexPath];
+      }
+    }
+  });
+
+  it("checkAndStartIdleTimer does not start timer when SSE clients are connected", async () => {
+    configureIdleShutdown(60_000);
+    // No plugins, but add an SSE client so the server is NOT idle
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sseClients.add({ controller, connectedAt: Date.now() });
+      },
+    });
+    const reader = stream.getReader();
+
+    expect(sseClients.size).toBe(1);
+    expect(plugins.size).toBe(0);
+
+    // Spy on console.log to verify no "Auto-shutdown" message
+    const logSpy = spyOn(console, "log");
+    checkAndStartIdleTimer();
+
+    // Should NOT have logged the auto-shutdown message
+    const shutdownLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" && args[0].includes("Auto-shutdown")
+    );
+    expect(shutdownLogs.length).toBe(0);
+
+    logSpy.mockRestore();
+    reader.cancel();
+  });
+
+  it("clearIdleTimer cancels a running timer and logs cancellation", () => {
+    configureIdleShutdown(60_000);
+
+    // Start a timer (no plugins, no clients)
+    checkAndStartIdleTimer();
+
+    // Spy on console.log to verify the cancellation message
+    const logSpy = spyOn(console, "log");
+
+    clearIdleTimer();
+
+    // Verify the cancellation log message
+    const cancelLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("Idle timer cancelled")
+    );
+    expect(cancelLogs.length).toBe(1);
+
+    // Calling clearIdleTimer again should NOT log (no timer to cancel)
+    logSpy.mock.calls.length = 0;
+    clearIdleTimer();
+    const cancelLogs2 = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("Idle timer cancelled")
+    );
+    expect(cancelLogs2.length).toBe(0);
+
+    logSpy.mockRestore();
+  });
+
+  it("checkAndStartIdleTimer logs the countdown message", () => {
+    configureIdleShutdown(120_000);
+
+    const logSpy = spyOn(console, "log");
+
+    checkAndStartIdleTimer();
+
+    // Should log "Auto-shutdown in 120s..."
+    const startLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("Auto-shutdown in 120s")
+    );
+    expect(startLogs.length).toBe(1);
+
+    logSpy.mockRestore();
+    clearIdleTimer();
+  });
+
+  it("timer fires shutdown() when server is still idle at fire time", async () => {
+    // We need to mock require("./index") to intercept the shutdown() call
+    // without actually starting the server or calling process.exit.
+    //
+    // The timer callback does: const { shutdown } = require("./index");
+    // We mock the module so shutdown() is a spy instead of the real function.
+    let shutdownCalled = false;
+
+    // Save the original require cache entry and replace it
+    const indexPath = require.resolve("./index");
+    const originalModule = require.cache[indexPath];
+    require.cache[indexPath] = {
+      id: indexPath,
+      filename: indexPath,
+      loaded: true,
+      exports: {
+        shutdown: () => {
+          shutdownCalled = true;
+        },
+      },
+    } as any;
+
+    try {
+      configureIdleShutdown(10); // 10ms — fires quickly
+
+      // No plugins, no clients — server is idle
+      expect(plugins.size).toBe(0);
+      expect(sseClients.size).toBe(0);
+
+      const logSpy = spyOn(console, "log");
+
+      checkAndStartIdleTimer();
+
+      // Wait for the timer to fire
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Verify shutdown was called
+      expect(shutdownCalled).toBe(true);
+
+      // Verify the "shutting down" log message
+      const fireLogs = logSpy.mock.calls.filter(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("Idle timeout reached")
+      );
+      expect(fireLogs.length).toBe(1);
+
+      logSpy.mockRestore();
+    } finally {
+      // Restore the original module cache entry
+      if (originalModule) {
+        require.cache[indexPath] = originalModule;
+      } else {
+        delete require.cache[indexPath];
+      }
+    }
+  });
+
+  it("race guard logs abort message when activity detected at fire time", async () => {
+    configureIdleShutdown(10); // 10ms
+
+    checkAndStartIdleTimer();
+
+    // Directly add a plugin to the map without going through handleRegister
+    // (which would cancel the timer). This simulates a plugin connecting
+    // between timer start and fire, triggering the race guard path.
+    plugins.set("race-guard-plugin", {
+      pluginId: "race-guard-plugin",
+      projectPath: "/Users/test/project",
+      projectName: "race-log-test",
+      registeredAt: Date.now(),
+      lastHeartbeat: Date.now(),
+    } as any);
+
+    const logSpy = spyOn(console, "log");
+
+    // Wait for the timer to fire (race guard should abort)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const abortLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("shutdown aborted")
+    );
+    expect(abortLogs.length).toBe(1);
+
+    logSpy.mockRestore();
+  });
+
+  it("configureIdleShutdown(0) disables the feature entirely", () => {
+    configureIdleShutdown(0);
+
+    const logSpy = spyOn(console, "log");
+
+    checkAndStartIdleTimer();
+
+    // Should NOT log any auto-shutdown message since feature is disabled
+    const anyShutdownLogs = logSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("Auto-shutdown")
+    );
+    expect(anyShutdownLogs.length).toBe(0);
+
+    logSpy.mockRestore();
   });
 });

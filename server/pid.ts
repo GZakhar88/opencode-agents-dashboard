@@ -26,6 +26,7 @@ export interface PidFileData {
 const PID_DIR = join(homedir(), ".cache", "opencode");
 const PID_FILE = join(PID_DIR, "opencode-dashboard.pid");
 const LOG_FILE = join(PID_DIR, "opencode-dashboard.log");
+const AUTOSTART_FILE = join(PID_DIR, "opencode-dashboard.autostart");
 
 const MAX_LOG_SIZE_BYTES = 1_048_576; // 1 MB
 
@@ -178,4 +179,72 @@ export async function isServerRunning(
   }
 
   return pidData;
+}
+
+// --- Autostart Marker ---
+
+/**
+ * Autostart marker file tracks whether the user has previously activated
+ * the dashboard. When present, the plugin will auto-start the server on
+ * subsequent sessions instead of staying dormant.
+ *
+ * The marker is:
+ * - Written when the dashboard is first activated (startupSequence succeeds)
+ * - Removed when the user explicitly calls dashboard_stop
+ * - Checked during plugin auto-connect to decide whether to spawn a server
+ */
+
+export interface AutostartData {
+  port: number;
+  createdAt: string; // ISO timestamp
+}
+
+/** Get the autostart marker file path (exposed for testing) */
+export function getAutostartFilePath(): string {
+  return AUTOSTART_FILE;
+}
+
+/**
+ * Write the autostart marker to indicate the dashboard should auto-start
+ * on subsequent plugin loads.
+ */
+export function writeAutostart(port: number): void {
+  if (!existsSync(PID_DIR)) {
+    mkdirSync(PID_DIR, { recursive: true });
+  }
+  const data: AutostartData = {
+    port,
+    createdAt: new Date().toISOString(),
+  };
+  writeFileSync(AUTOSTART_FILE, JSON.stringify(data, null, 2), "utf-8");
+}
+
+/**
+ * Read the autostart marker. Returns null if the marker doesn't exist
+ * or is malformed.
+ */
+export function readAutostart(): AutostartData | null {
+  try {
+    if (!existsSync(AUTOSTART_FILE)) return null;
+    const raw = readFileSync(AUTOSTART_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as AutostartData;
+    if (typeof parsed.port !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove the autostart marker (e.g. when the user explicitly stops
+ * the dashboard via dashboard_stop).
+ */
+export function removeAutostart(): void {
+  try {
+    if (existsSync(AUTOSTART_FILE)) {
+      unlinkSync(AUTOSTART_FILE);
+    }
+  } catch {
+    // Ignore errors (file may already be gone)
+  }
 }

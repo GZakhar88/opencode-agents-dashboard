@@ -21,6 +21,7 @@ import {
   createSSEResponse,
   closeAllClients,
   clientCount,
+  setClientCountChangeCallback,
   reset as resetSSE,
 } from "./sse";
 import { join } from "path";
@@ -102,6 +103,91 @@ const plugins = new Map<string, PluginRecord>();
 
 /** Server start time for uptime calculation */
 const startTime = Date.now();
+
+// --- Idle Auto-Shutdown ---
+
+/** Handle for the idle shutdown timer (null when not ticking) */
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Idle timeout in milliseconds; 0 or negative disables the feature */
+let idleTimeoutMs: number = 300_000;
+
+/**
+ * Configure the idle auto-shutdown feature.
+ *
+ * Sets the idle timeout value and registers a callback on SSE client
+ * count changes so that the idle timer is started/cleared automatically
+ * when all dashboard browser tabs connect or disconnect.
+ */
+export function configureIdleShutdown(timeoutMs: number): void {
+  idleTimeoutMs = timeoutMs;
+
+  setClientCountChangeCallback(() => {
+    if (clientCount() === 0) {
+      checkAndStartIdleTimer();
+    } else {
+      clearIdleTimer();
+    }
+  });
+}
+
+/**
+ * Start the idle shutdown timer if the server is truly idle
+ * (no registered plugins AND no connected SSE clients).
+ *
+ * Does nothing if:
+ * - The feature is disabled (idleTimeoutMs <= 0)
+ * - There are still plugins or clients connected
+ * - A timer is already ticking
+ */
+export function checkAndStartIdleTimer(): void {
+  if (idleTimeoutMs <= 0) return;
+
+  if (plugins.size > 0 || clientCount() > 0) {
+    clearIdleTimer();
+    return;
+  }
+
+  if (idleTimer !== null) return; // already ticking
+
+  const timeoutSec = Math.round(idleTimeoutMs / 1000);
+  console.log(
+    `[server] No plugins or clients connected. Auto-shutdown in ${timeoutSec}s...`
+  );
+
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    // Race-condition guard: re-check conditions before pulling the trigger
+    if (plugins.size > 0 || clientCount() > 0) {
+      console.log(
+        "[server] Idle timer fired but activity detected — shutdown aborted."
+      );
+      return;
+    }
+    console.log("[server] Idle timeout reached — shutting down.");
+    // Dynamic require to avoid circular dependency at module load time:
+    // routes.ts ↔ index.ts both import from each other, but shutdown()
+    // is only needed at runtime (inside a setTimeout callback), so lazy
+    // resolution via require() defers the import until it's actually called.
+    const { shutdown: performShutdown } = require("./index");
+    performShutdown();
+  }, idleTimeoutMs);
+
+  // Don't let the timer keep the process alive on its own
+  idleTimer.unref();
+}
+
+/**
+ * Cancel a running idle shutdown timer (e.g. when a plugin registers
+ * or an SSE client connects).
+ */
+export function clearIdleTimer(): void {
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    console.log("[server] Idle timer cancelled — activity detected.");
+  }
+}
 
 // --- Helpers ---
 
@@ -206,6 +292,9 @@ async function handleRegister(
     projectName,
     pluginId,
   });
+
+  // A new plugin means activity — cancel any pending idle shutdown
+  clearIdleTimer();
 
   return json({ pluginId }, 200, origin);
 }
@@ -369,6 +458,9 @@ function handleDeregister(
     projectPath: plugin.projectPath,
     pluginId,
   });
+
+  // Plugin removed — check if the server is now idle
+  checkAndStartIdleTimer();
 
   return json({ ok: true }, 200, origin);
 }
@@ -543,6 +635,8 @@ const pluginHealthInterval = setInterval(() => {
         pluginId,
         reason: "heartbeat_timeout",
       });
+      // Plugin timed out — check if server is now idle
+      checkAndStartIdleTimer();
     }
   }
 }, PLUGIN_HEALTH_CHECK_INTERVAL_MS);

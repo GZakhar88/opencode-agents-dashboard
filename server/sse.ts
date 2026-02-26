@@ -27,6 +27,17 @@ const clients = new Set<SSEClient>();
 
 const encoder = new TextEncoder();
 
+/** Optional callback invoked whenever the connected client count changes */
+let onClientCountChange: (() => void) | null = null;
+
+/**
+ * Register a callback that fires whenever the SSE client count changes
+ * (connect, disconnect, or failed send/heartbeat removal).
+ */
+export function setClientCountChangeCallback(cb: () => void): void {
+  onClientCountChange = cb;
+}
+
 /**
  * Get the current number of connected SSE clients.
  */
@@ -61,6 +72,7 @@ export function broadcast(eventName: string, data: unknown): void {
       client.controller.enqueue(encoded);
     } catch {
       clients.delete(client);
+      try { onClientCountChange?.(); } catch { /* callback error must not disrupt broadcast loop */ }
     }
   }
 }
@@ -97,6 +109,7 @@ export function createSSEResponse(
         connectedAt: Date.now(),
       };
       clients.add(sseClient);
+      onClientCountChange?.();
 
       // Set reconnect interval
       controller.enqueue(encoder.encode("retry: 3000\n\n"));
@@ -122,6 +135,7 @@ export function createSSEResponse(
     cancel() {
       if (sseClient) {
         clients.delete(sseClient);
+        onClientCountChange?.();
       }
     },
   });
@@ -152,6 +166,7 @@ const sseHeartbeatInterval = setInterval(() => {
       client.controller.enqueue(heartbeat);
     } catch {
       clients.delete(client);
+      try { onClientCountChange?.(); } catch { /* callback error must not disrupt heartbeat loop */ }
     }
   }
 }, SSE_HEARTBEAT_INTERVAL_MS);
@@ -189,6 +204,7 @@ export function reset(): void {
   }
   clients.clear();
   messageId = 0;
+  onClientCountChange = null;
 }
 
 // --- Exports for testing ---

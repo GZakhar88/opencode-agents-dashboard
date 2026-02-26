@@ -20,7 +20,8 @@
 import { join } from "path";
 import { readdir, copyFile, mkdir, stat } from "fs/promises";
 import { createInterface } from "readline";
-import { readPid, removePid, isServerRunning } from "../server/pid";
+import { readPid, removePid, isServerRunning, openLogFile, getLogFilePath } from "../server/pid";
+import { closeSync } from "fs";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -110,16 +111,27 @@ async function cmdStart(args: string[]): Promise<void> {
   // Use Bun.which to find bun reliably (process.execPath may not always be bun)
   const bunPath = Bun.which("bun") ?? process.execPath;
 
+  let logFd: number | undefined;
+  try {
+    logFd = openLogFile();
+  } catch {
+    // If log file can't be opened, fall back to ignore
+  }
+
   try {
     const proc = Bun.spawn([bunPath, "run", SERVER_ENTRY], {
       detached: true,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
       env: { ...process.env, DASHBOARD_PORT: String(port) },
     });
     proc.unref();
   } catch (err: any) {
     console.error(`Failed to start server: ${err?.message ?? err}`);
     process.exit(1);
+  } finally {
+    if (logFd !== undefined) {
+      try { closeSync(logFd); } catch {}
+    }
   }
 
   // Poll for readiness
@@ -128,12 +140,14 @@ async function cmdStart(args: string[]): Promise<void> {
     await Bun.sleep(SPAWN_POLL_INTERVAL_MS);
     if (await checkHealth(port)) {
       console.log(`Dashboard running at http://localhost:${port}`);
+      console.log(`  Logs: ${getLogFilePath()}`);
       return;
     }
   }
 
   console.error(`Server failed to start within ${SPAWN_TIMEOUT_MS / 1000}s.`);
   console.error(`Check if port ${port} is already in use.`);
+  console.error(`  Logs: ${getLogFilePath()}`);
   process.exit(1);
 }
 

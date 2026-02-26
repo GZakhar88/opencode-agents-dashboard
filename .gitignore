@@ -8,7 +8,8 @@ dist/
 server/.dashboard-state.json
 server/.test-state.json
 
-# Bun
+# Lockfiles (library — consumers use their own)
+package-lock.json
 bun.lockb
 
 # TypeScript build info
@@ -33,6 +34,7 @@ ARCHITECTURE.md
 DASHBOARD_PLAN.md
 DECOUPLING_PLAN.md
 DISTRIBUTION_PLAN.md
+plan_files/
 
 # PID file (runtime)
 opencode-dashboard.pid

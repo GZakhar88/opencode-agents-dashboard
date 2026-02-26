@@ -20,9 +20,11 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
-import { isServerRunning, readPid, writePid, removePid } from "../server/pid";
+import { computeBuildHash } from "../shared/version";
+import { isServerRunning, readPid, writePid, removePid, openLogFile, getLogFilePath } from "../server/pid";
 import { join, resolve } from "path";
 import { readdir, readFile, copyFile, mkdir, stat } from "fs/promises";
+import { closeSync } from "fs";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -74,6 +76,7 @@ let currentBeadId: string | null = null;
 let sessionToAgent = new Map<string, string>();
 let pendingAgentType: string | null = null;
 let currentAgentName: string | null = null; // tracks the agent handling the current chat.message
+let activePrimarySession: string | null = null; // tracks primary session with active agent:active event
 
 // Agent discovery results
 let discoveredAgents: DiscoveredAgent[] = [];
@@ -432,6 +435,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(orchestratorAgent),
       order: order++,
+      group: "pipeline",
     });
   }
 
@@ -443,6 +447,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(agent),
       order: order++,
+      group: "pipeline",
     });
   }
 
@@ -454,6 +459,7 @@ function generateColumnConfig(agents: DiscoveredAgent[]): ColumnConfig[] {
       type: "agent",
       color: nextColor(agent),
       order: order++,
+      group: "standalone",
     });
   }
 
@@ -543,6 +549,26 @@ async function checkServerHealth(): Promise<boolean> {
   }
 }
 
+/**
+ * Get the server's build hash from the health endpoint.
+ * Returns null if the server doesn't report a hash or is unreachable.
+ */
+async function getServerBuildHash(port?: number): Promise<string | null> {
+  try {
+    const url = port
+      ? `http://localhost:${port}/api/health`
+      : serverUrl("/api/health");
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { buildHash?: string };
+    return data.buildHash ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function spawnServer(port: number): Promise<boolean> {
   // Resolve the bun executable path. We cannot use process.execPath because
   // when running inside OpenCode, that points to the OpenCode Go binary,
@@ -556,17 +582,28 @@ async function spawnServer(port: number): Promise<boolean> {
   log(`Server not running, starting on port ${port}...`);
   log(`Spawning: ${bunPath} run ${SERVER_ENTRY}`);
 
+  let logFd: number | undefined;
+  try {
+    logFd = openLogFile();
+  } catch {
+    // If log file can't be opened, fall back to ignore
+  }
+
   try {
     const proc = Bun.spawn([bunPath, "run", SERVER_ENTRY], {
       detached: true,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
       env: { ...process.env, DASHBOARD_PORT: String(port) },
     });
     proc.unref();
-    log(`Spawned server process (PID: ${proc.pid})`);
+    log(`Spawned server process (PID: ${proc.pid}), logs: ${getLogFilePath()}`);
   } catch (err) {
     logError(`Failed to spawn server process:`, err);
     return false;
+  } finally {
+    if (logFd !== undefined) {
+      try { closeSync(logFd); } catch {}
+    }
   }
 
   // Poll for readiness
@@ -1071,7 +1108,7 @@ async function getServerStatus(): Promise<string> {
 
 export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
   const projectName = directory.split("/").pop() || "unknown";
-  log(`Plugin loaded for ${projectName} (dormant — waiting for /dashboard-start)`);
+  log(`Plugin loaded for ${projectName} — checking for existing server`);
   log(`Directory: ${directory}`);
 
   projectPath = directory;
@@ -1113,6 +1150,77 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
     log("Setup not detected — commands not installed in either location");
   }
 
+  // Auto-connect to existing server if one is already running.
+  // This enables event flow (agent:active, bead:stage, etc.) without
+  // requiring the user to manually call dashboard_start each session.
+  // Fire-and-forget: don't block plugin load / hook registration.
+  (async () => {
+    try {
+      let existing = await isServerRunning(true);
+      if (!existing) {
+        log("No existing server found — staying dormant");
+        return;
+      }
+
+      // Version check: compare server's build hash with current code on disk.
+      // If they differ, the server is running stale code and must be restarted.
+      const expectedHash = computeBuildHash();
+      const serverHash = await getServerBuildHash(existing.port);
+
+      if (serverHash && serverHash !== expectedHash) {
+        log(`Server code is stale (server: ${serverHash}, expected: ${expectedHash}) — restarting`);
+        // Kill the old server
+        try {
+          process.kill(existing.pid, "SIGTERM");
+          removePid();
+        } catch { /* ignore — process may already be gone */ }
+
+        // Wait briefly for the old server to die
+        await Bun.sleep(1000);
+
+        // Spawn a fresh server on the same port
+        const started = await spawnServer(existing.port);
+        if (!started) {
+          warn("Failed to restart server after detecting stale code");
+          return;
+        }
+        log("Server restarted with fresh code");
+
+        // Re-read PID data since we spawned a new server
+        existing = await isServerRunning(true);
+        if (!existing) {
+          warn("Server restarted but PID file not found");
+          return;
+        }
+      } else if (serverHash) {
+        log(`Server code is current (hash: ${serverHash})`);
+      } else {
+        log("Server does not report build hash — skipping version check");
+      }
+
+      log(`Found existing server (PID: ${existing.pid}, port: ${existing.port}) — auto-connecting`);
+
+      // Discover agents first (startupSequence needs discoveredAgents populated)
+      discoveredAgents = await discoverAllAgents(directory);
+      hasPipelineAgents = discoveredAgents.some((a) => a.name in PIPELINE_AGENT_ORDER);
+      log(
+        `Discovered ${discoveredAgents.length} agent(s)` +
+          (hasPipelineAgents ? " (pipeline agents present)" : " (no pipeline agents)"),
+      );
+
+      const result = await startupSequence(directory, projectName, $, existing.port);
+      if (serverReady) {
+        activated = true;
+        toast(`Auto-connected to dashboard at http://localhost:${existing.port}`, "success", "Dashboard");
+        log(`Auto-connect succeeded: ${result}`);
+      } else {
+        log(`Auto-connect failed: ${result}`);
+      }
+    } catch (err) {
+      warn("Auto-connect error:", err);
+    }
+  })();
+
   return {
     // ─── Custom Tools (LLM-callable) ──────────────────────────
 
@@ -1132,9 +1240,53 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
             args.port ?? (Number(process.env.DASHBOARD_PORT) || DEFAULT_PORT);
 
           // Check if already running
-          const existing = await isServerRunning(true);
+          let existing = await isServerRunning(true);
           if (existing) {
             serverPort = existing.port;
+
+            // Version check: restart stale server
+            const expectedHash = computeBuildHash();
+            const serverHash = await getServerBuildHash(existing.port);
+
+            if (serverHash && serverHash !== expectedHash) {
+              log(`dashboard_start: server is stale (server: ${serverHash}, expected: ${expectedHash}) — restarting`);
+
+              // Deregister from old server if currently connected
+              if (activated) {
+                stopHeartbeat();
+                await deregisterFromServer();
+                serverReady = false;
+                activated = false;
+              }
+
+              // Kill old server
+              try {
+                process.kill(existing.pid, "SIGTERM");
+                removePid();
+              } catch { /* ignore — process may already be gone */ }
+
+              await Bun.sleep(1000);
+
+              // Spawn fresh and connect
+              activating = true;
+              try {
+                const result = await startupSequence(directory, projectName, $, existing.port);
+                activated = true;
+                const isSuccess = serverReady;
+                toast(
+                  isSuccess ? `Dashboard restarted (stale code detected) at http://localhost:${existing.port}` : result,
+                  isSuccess ? "success" : "warning",
+                  "Dashboard",
+                );
+                return isSuccess
+                  ? `Dashboard restarted with fresh code at http://localhost:${existing.port}`
+                  : result;
+              } finally {
+                activating = false;
+              }
+            }
+
+            // Server is current — connect or report already running
             if (!activated) {
               // Server is running but plugin isn't connected — connect now
               const result = await startupSequence(directory, projectName, $, existing.port);
@@ -1240,9 +1392,22 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       const model = input.model;
       const agent = input.agent;
 
+      log(`chat.message: session=${sessionID} agent=${agent ?? "(none)"} model=${model ?? "(unknown)"} activated=${activated} serverReady=${serverReady}`);
+
       // Track current agent for bead:claimed stage tracking
       if (agent) {
         currentAgentName = agent;
+      }
+
+      // Send agent:active for primary agents (not subagents tracked in sessionToAgent)
+      // Only send if not already active for this session to avoid duplicates
+      if (agent && serverReady && !sessionToAgent.has(sessionID) && activePrimarySession !== sessionID) {
+        activePrimarySession = sessionID;
+        await pushEvent("agent:active", {
+          agent: agent,
+          sessionId: sessionID,
+          beadId: currentBeadId,
+        });
       }
 
       if (injectedSessions.has(sessionID)) return;
@@ -1415,6 +1580,7 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
           const sessionID = props?.sessionID;
           if (typeof sessionID !== "string" || !sessionID) return;
 
+          // Handle subagent idle (existing behavior)
           const agentType = sessionToAgent.get(sessionID);
           if (agentType) {
             log(`Agent idle: ${agentType} (session: ${sessionID})`);
@@ -1426,6 +1592,19 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
               });
             }
             sessionToAgent.delete(sessionID);
+          }
+
+          // Handle primary agent idle (not a subagent, but a built-in agent like Build, Plan, etc.)
+          if (!sessionToAgent.has(sessionID) && currentAgentName && activePrimarySession === sessionID) {
+            log(`Primary agent idle: ${currentAgentName} (session: ${sessionID})`);
+            activePrimarySession = null;
+            if (serverReady) {
+              await pushEvent("agent:idle", {
+                agent: currentAgentName,
+                sessionId: sessionID,
+                beadId: currentBeadId,
+              });
+            }
           }
 
           if (serverReady) {

@@ -440,29 +440,44 @@ function handleDeregister(
   origin?: string | null
 ): Response {
   const plugin = plugins.get(pluginId);
-  if (!plugin) {
-    return json({ error: `Unknown pluginId: ${pluginId}` }, 404, origin);
+  if (plugin) {
+    // Active plugin — deregister from in-memory registry + state
+    plugins.delete(pluginId);
+    stateManager.deregisterPlugin(pluginId);
+
+    console.log(
+      `[server] Plugin deregistered: ${pluginId} (${plugin.projectName})`
+    );
+
+    // Broadcast disconnection to SSE clients
+    broadcast("project:disconnected", {
+      projectPath: plugin.projectPath,
+      pluginId,
+    });
+
+    // Plugin removed — check if the server is now idle
+    checkAndStartIdleTimer();
+
+    return json({ ok: true }, 200, origin);
   }
 
-  plugins.delete(pluginId);
+  // Not in active registry — try removing from persisted state
+  // (handles stale/disconnected projects from previous sessions)
+  const removed = stateManager.removeProject(pluginId);
+  if (removed) {
+    console.log(
+      `[server] Stale project removed: ${pluginId} (${removed.projectName})`
+    );
 
-  // Mark project as disconnected in state (retains last-known state)
-  stateManager.deregisterPlugin(pluginId);
+    broadcast("project:removed", {
+      projectPath: removed.projectPath,
+      pluginId,
+    });
 
-  console.log(
-    `[server] Plugin deregistered: ${pluginId} (${plugin.projectName})`
-  );
+    return json({ ok: true, removed: removed.projectName }, 200, origin);
+  }
 
-  // Broadcast disconnection to SSE clients
-  broadcast("project:disconnected", {
-    projectPath: plugin.projectPath,
-    pluginId,
-  });
-
-  // Plugin removed — check if the server is now idle
-  checkAndStartIdleTimer();
-
-  return json({ ok: true }, 200, origin);
+  return json({ error: `Unknown pluginId: ${pluginId}` }, 404, origin);
 }
 
 /**

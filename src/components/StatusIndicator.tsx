@@ -6,14 +6,25 @@
  *   connected    → green
  *   reconnecting → yellow/amber (pulsing)
  *   disconnected → red
+ *
+ * Supports compact mode (dot-only) for mobile header.
+ * Badge transitions smoothly between color states via CSS transitions
+ * on background, border-color, and color properties.
  */
 
 import type { ConnectionStatus } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface StatusIndicatorProps {
   status: ConnectionStatus;
+  /** When true, renders a dot-only indicator (mobile header) */
+  compact?: boolean;
 }
 
 const STATUS_CONFIG: Record<
@@ -22,32 +33,64 @@ const STATUS_CONFIG: Record<
 > = {
   connecting: {
     label: "Connecting",
-    className: "border-amber-500/50 bg-amber-500/10 text-amber-400",
-    dot: "bg-amber-400 animate-pulse",
+    className: "border-status-warning/50 bg-status-warning/10 text-status-warning",
+    dot: "bg-status-warning animate-pulse",
   },
   connected: {
     label: "Connected",
-    className: "border-green-500/50 bg-green-500/10 text-green-400",
-    dot: "bg-green-400",
+    className: "border-status-live/50 bg-status-live/10 text-status-live",
+    dot: "bg-status-live",
   },
   reconnecting: {
     label: "Reconnecting",
-    className: "border-amber-500/50 bg-amber-500/10 text-amber-400",
-    dot: "bg-amber-400 animate-pulse",
+    className: "border-status-warning/50 bg-status-warning/10 text-status-warning",
+    dot: "bg-status-warning animate-pulse",
   },
   disconnected: {
     label: "Disconnected",
-    className: "border-red-500/50 bg-red-500/10 text-red-400",
-    dot: "bg-red-400",
+    className: "border-status-error/50 bg-status-error/10 text-status-error",
+    dot: "bg-status-error",
   },
 };
 
-export function StatusIndicator({ status }: StatusIndicatorProps) {
+export function StatusIndicator({ status, compact = false }: StatusIndicatorProps) {
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.disconnected;
 
+  if (compact) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex h-[44px] w-[44px] items-center justify-center"
+            aria-label={`Connection status: ${config.label}`}
+            role="status"
+            tabIndex={0}
+          >
+            <span className={cn(
+              "h-2.5 w-2.5 rounded-full transition-colors duration-500 ease-in-out",
+              config.dot,
+            )} />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {config.label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
-    <Badge variant="outline" className={cn("gap-1.5", config.className)}>
-      <span className={cn("h-2 w-2 rounded-full", config.dot)} />
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1.5 font-mono text-[11px] transition-colors duration-500 ease-in-out",
+        config.className,
+      )}
+    >
+      <span className={cn(
+        "h-2 w-2 rounded-full transition-colors duration-500 ease-in-out",
+        config.dot,
+      )} />
       {config.label}
     </Badge>
   );

@@ -32,9 +32,9 @@ type BannerState = "hidden" | "reconnecting" | "disconnected" | "restored";
 
 /** Style config for each visible banner state, mirroring StatusIndicator's pattern */
 const BANNER_STYLES: Record<Exclude<BannerState, "hidden">, string> = {
-  reconnecting: "bg-amber-500/10 text-amber-300 border-b border-amber-500/20",
-  disconnected: "bg-red-500/10 text-red-300 border-b border-red-500/20",
-  restored: "bg-green-500/10 text-green-300 border-b border-green-500/20",
+  reconnecting: "bg-status-warning/10 text-status-warning border-b border-status-warning/20",
+  disconnected: "bg-status-error/10 text-status-error border-b border-status-error/20",
+  restored: "bg-status-live/10 text-status-live border-b border-status-live/20",
 };
 
 export function ReconnectBanner({ status, onReconnect }: ReconnectBannerProps) {
@@ -115,14 +115,14 @@ export function ReconnectBanner({ status, onReconnect }: ReconnectBannerProps) {
                 <span>Reconnecting to server...</span>
                 {showManualHint && (
                   <>
-                    <span className="text-amber-400/60">·</span>
-                    <span className="text-xs text-amber-400/80">
+                    <span className="text-status-warning/60">·</span>
+                    <span className="text-xs text-status-warning/80">
                       Taking longer than expected.
                     </span>
                     <button
                       type="button"
                       onClick={handleManualReconnect}
-                      className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                      className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-warning/60"
                     >
                       <RefreshCw className="h-3 w-3" />
                       Retry now
@@ -136,13 +136,13 @@ export function ReconnectBanner({ status, onReconnect }: ReconnectBannerProps) {
               <>
                 <WifiOff className="h-4 w-4" />
                 <span>Connection lost.</span>
-                <span className="text-xs text-red-400/80">
+                <span className="text-xs text-status-error/80">
                   Is the server running?
                 </span>
                 <button
                   type="button"
                   onClick={handleManualReconnect}
-                  className="ml-2 inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-200 transition-colors hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                  className="ml-2 inline-flex items-center gap-1 rounded border border-status-error/30 bg-status-error/10 px-3 py-1 text-xs font-medium text-status-error transition-colors hover:bg-status-error/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
                 >
                   <RefreshCw className="h-3 w-3" />
                   Reconnect

@@ -1,45 +1,75 @@
 /**
  * LoadingSkeleton — Placeholder skeleton shown during initial SSE connection.
  *
- * Mimics the layout of a project section with pipeline header and columns
- * to avoid layout shift when data loads.
+ * Mimics the layout of the project card grid to avoid layout shift
+ * when data loads. Shows 3 skeleton cards in a responsive row.
+ *
+ * On mobile (< 640px), shows progress bar skeleton instead of board columns.
  */
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProjectRow } from "@/components/ProjectRow";
+import { useMaxColumns } from "@/hooks/useBreakpoint";
 
 export function LoadingSkeleton() {
+  const maxCols = useMaxColumns();
+  const skeletonCount = Math.min(3, maxCols);
+
   return (
-    <div className="space-y-6">
-      {/* Project header skeleton */}
-      <div className="flex items-center gap-3 px-4 py-3">
-        <Skeleton className="h-4 w-4" />
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-4 w-64" />
-        <span className="flex-1" />
-        <Skeleton className="h-6 w-24 rounded-full" />
-      </div>
+    <div className="project-rows">
+      <ProjectRow columns={skeletonCount}>
+      {Array.from({ length: skeletonCount }).map((_, cardIndex) => (
+        <div
+          key={cardIndex}
+          className="project-card"
+          data-status="idle"
+        >
+          {/* Card header skeleton */}
+          <div className="flex items-center gap-3 px-3 py-3.5 sm:px-4">
+            <Skeleton className="h-4 w-4 shrink-0" />
+            <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-48" />
+            </div>
+            <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
+          </div>
 
-      {/* Pipeline header skeleton */}
-      <div className="flex items-center gap-3 pl-11">
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-5 w-12 rounded-full" />
-      </div>
+          {/* Pipeline content skeleton */}
+          <div className="border-t border-border/50 px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
+            {/* Pipeline header */}
+            <div className="flex items-center gap-3 py-2">
+              <Skeleton className="hidden h-6 w-16 rounded sm:block" />
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-5 w-12 rounded-full" />
+            </div>
 
-      {/* Columns skeleton */}
-      <div className="flex gap-3 overflow-x-auto pl-11 scrollbar-thin">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div
-            key={i}
-            className="flex w-[240px] min-w-[240px] flex-col rounded-lg border bg-muted/30 p-3"
-          >
-            <Skeleton className="mb-3 h-4 w-20" />
-            <div className="space-y-2">
-              {i < 3 && <Skeleton className="h-20 w-full rounded-lg" />}
-              {i < 2 && <Skeleton className="h-20 w-full rounded-lg" />}
+            {/* Mobile: progress bar skeleton */}
+            <div className="sm:hidden">
+              <Skeleton className="h-2 w-full rounded-full" />
+            </div>
+
+            {/* Desktop: Board columns */}
+            <div className="hidden gap-3 overflow-x-auto scrollbar-thin sm:flex">
+              {Array.from({ length: cardIndex === 0 ? 4 : 3 }).map((_, colIndex) => (
+                <div
+                  key={colIndex}
+                  className="flex w-[240px] min-w-[240px] flex-col rounded-lg border bg-muted/30 p-3"
+                >
+                  <Skeleton className="mb-3 h-4 w-20" />
+                  {colIndex < 2 && (
+                    <div className="space-y-2">
+                      <Skeleton className="h-16 w-full rounded-lg" />
+                      {colIndex === 0 && <Skeleton className="h-16 w-full rounded-lg" />}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
+      </ProjectRow>
     </div>
   );
 }

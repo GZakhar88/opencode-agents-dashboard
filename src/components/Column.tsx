@@ -14,7 +14,7 @@
  * more columns to fit without horizontal scrolling.
  */
 
-import type { BeadState } from "@shared/types";
+import type { BeadState, ColumnConfig } from "@shared/types";
 import { AnimatePresence } from "framer-motion";
 import { AlertTriangle } from "lucide-react";
 import { BeadCard } from "@/components/BeadCard";
@@ -25,9 +25,11 @@ interface ColumnProps {
   label: string;
   color: string;
   beads: BeadState[];
+  /** All columns in the pipeline — passed to BeadCard for mini progress */
+  columns?: ColumnConfig[];
 }
 
-export function Column({ columnId, label, color, beads }: ColumnProps) {
+export function Column({ columnId, label, color, beads, columns }: ColumnProps) {
   const isErrorColumn = columnId === "error";
   const hasErrors = isErrorColumn && beads.length > 0;
 
@@ -87,7 +89,7 @@ export function Column({ columnId, label, color, beads }: ColumnProps) {
         <AnimatePresence mode="popLayout">
           {beads.map((bead) => (
             <div key={bead.id} role="listitem">
-              <BeadCard bead={bead} />
+              <BeadCard bead={bead} columns={columns} />
             </div>
           ))}
         </AnimatePresence>

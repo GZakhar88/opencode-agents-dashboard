@@ -109,6 +109,7 @@ export function Board({ pipeline, isExpanded, columns }: BoardProps) {
               label={col.label}
               color={col.color}
               beads={beadsByStage.get(col.id) ?? []}
+              columns={sortedColumns}
             />
           ))}
         </div>

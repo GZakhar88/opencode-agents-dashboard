@@ -73,12 +73,30 @@
   animation: agent-pulse 2s ease-in-out infinite;
 }
 
+/* Elapsed time pulse — makes active processing time visually prominent */
+@keyframes elapsed-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.animate-elapsed-pulse {
+  animation: elapsed-pulse 1.5s ease-in-out infinite;
+}
+
 /* Respect OS-level reduced-motion preference for CSS animations */
 @media (prefers-reduced-motion: reduce) {
   .animate-agent-pulse {
     animation: none;
   }
   .animate-pulse {
+    animation: none;
+  }
+  .animate-elapsed-pulse {
     animation: none;
   }
 }

@@ -21,7 +21,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
 import { computeBuildHash } from "../shared/version";
-import { isServerRunning, readPid, writePid, removePid, openLogFile, getLogFilePath } from "../server/pid";
+import { isServerRunning, readPid, writePid, removePid, openLogFile, getLogFilePath, readAutostart, writeAutostart, removeAutostart } from "../server/pid";
 import { join, resolve } from "path";
 import { readdir, readFile, copyFile, mkdir, stat } from "fs/promises";
 import { closeSync } from "fs";
@@ -982,6 +982,12 @@ async function startupSequence(
   pluginId = id;
   serverReady = true;
 
+  // Write autostart marker so subsequent sessions auto-start the server.
+  // This ensures the dashboard "just works" across sessions without the user
+  // needing to manually call dashboard_start every time.
+  writeAutostart(serverPort);
+  log(`Wrote autostart marker (port ${serverPort})`);
+
   // Generate and send column config
   const columns = generateColumnConfig(discoveredAgents);
   await pushEvent("columns:update", { columns });
@@ -1150,7 +1156,8 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
     log("Setup not detected — commands not installed in either location");
   }
 
-  // Auto-connect to existing server if one is already running.
+  // Auto-connect to existing server if one is already running,
+  // or auto-start a new server if the user previously activated the dashboard.
   // This enables event flow (agent:active, bead:stage, etc.) without
   // requiring the user to manually call dashboard_start each session.
   // Fire-and-forget: don't block plugin load / hook registration.
@@ -1158,8 +1165,27 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
     try {
       let existing = await isServerRunning(true);
       if (!existing) {
-        log("No existing server found — staying dormant");
-        return;
+        // No server running — check if the user previously activated the dashboard
+        const autostart = readAutostart();
+        if (autostart) {
+          log("No server found but autostart marker exists — spawning server");
+          const port = autostart.port || DEFAULT_PORT;
+          const started = await spawnServer(port);
+          if (started) {
+            existing = await isServerRunning(true);
+            if (!existing) {
+              warn("Server spawned but PID file not found after autostart");
+              return;
+            }
+            log(`Auto-started server on port ${existing.port} (from autostart marker)`);
+          } else {
+            warn("Failed to auto-start server from autostart marker");
+            return;
+          }
+        } else {
+          log("No existing server found — staying dormant");
+          return;
+        }
       }
 
       // Version check: compare server's build hash with current code on disk.
@@ -1319,6 +1345,10 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
           "Call this when the user wants to shut down the dashboard.",
         args: {},
         async execute() {
+          // Remove autostart marker so the server is not auto-started
+          // on the next session — the user explicitly wants it stopped.
+          removeAutostart();
+          log("Removed autostart marker (explicit stop)");
           const result = await stopServer();
           toast(result, "info", "Dashboard");
           return result;
@@ -1393,6 +1423,37 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       const agent = input.agent;
 
       log(`chat.message: session=${sessionID} agent=${agent ?? "(none)"} model=${model ?? "(unknown)"} activated=${activated} serverReady=${serverReady}`);
+
+      // Lazy reconnection: if this plugin session is dormant but a server
+      // is available (started by another OpenCode session or auto-started),
+      // connect now. This handles the multi-session scenario where session B
+      // starts before session A starts the dashboard.
+      if (!activated && !activating) {
+        const pidData = readPid();
+        if (pidData) {
+          log("Dormant session detected available server — attempting lazy connect");
+          // Fire-and-forget: don't block the chat.message hook
+          activating = true;
+          (async () => {
+            try {
+              discoveredAgents = await discoverAllAgents(directory);
+              hasPipelineAgents = discoveredAgents.some((a) => a.name in PIPELINE_AGENT_ORDER);
+              const result = await startupSequence(directory, projectName, $, pidData.port);
+              if (serverReady) {
+                activated = true;
+                toast(`Auto-connected to dashboard at http://localhost:${pidData.port}`, "success", "Dashboard");
+                log(`Lazy connect succeeded: ${result}`);
+              } else {
+                log(`Lazy connect failed: ${result}`);
+              }
+            } catch (err) {
+              warn("Lazy connect error:", err);
+            } finally {
+              activating = false;
+            }
+          })();
+        }
+      }
 
       // Track current agent for bead:claimed stage tracking
       if (agent) {

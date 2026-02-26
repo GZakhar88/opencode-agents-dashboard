@@ -2,6 +2,23 @@
 
 A real-time browser-based Kanban board that visualizes agent activity in [OpenCode](https://opencode.ai). Watch beads (tasks) move through agent stages -- from ready to done -- as AI agents work on them. Columns are generated dynamically based on your configured agents.
 
+## Screenshots
+
+### Multi-project overview
+Monitor multiple OpenCode sessions simultaneously. Each project card shows connection status, pipeline state, and bead progress at a glance.
+
+![Dashboard showing three connected projects with pipeline status](docs/screenshots/dashboard-multi-project.png)
+
+### Full dashboard with stale projects
+Projects that have disconnected are grouped separately, keeping the focus on active work.
+
+![Dashboard with four projects and stale project section](docs/screenshots/dashboard-overview.png)
+
+### Responsive layout
+The dashboard adapts to smaller viewports, reflowing project cards into a compact layout.
+
+![Dashboard on a tablet-sized viewport](docs/screenshots/dashboard-responsive.png)
+
 ## Installation
 
 1. Add the plugin to your OpenCode config:

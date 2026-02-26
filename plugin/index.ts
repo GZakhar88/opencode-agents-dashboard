@@ -1228,9 +1228,53 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
             args.port ?? (Number(process.env.DASHBOARD_PORT) || DEFAULT_PORT);
 
           // Check if already running
-          const existing = await isServerRunning(true);
+          let existing = await isServerRunning(true);
           if (existing) {
             serverPort = existing.port;
+
+            // Version check: restart stale server
+            const expectedHash = computeBuildHash();
+            const serverHash = await getServerBuildHash(existing.port);
+
+            if (serverHash && serverHash !== expectedHash) {
+              log(`dashboard_start: server is stale (server: ${serverHash}, expected: ${expectedHash}) — restarting`);
+
+              // Deregister from old server if currently connected
+              if (activated) {
+                stopHeartbeat();
+                await deregisterFromServer();
+                serverReady = false;
+                activated = false;
+              }
+
+              // Kill old server
+              try {
+                process.kill(existing.pid, "SIGTERM");
+                removePid();
+              } catch { /* ignore — process may already be gone */ }
+
+              await Bun.sleep(1000);
+
+              // Spawn fresh and connect
+              activating = true;
+              try {
+                const result = await startupSequence(directory, projectName, $, existing.port);
+                activated = true;
+                const isSuccess = serverReady;
+                toast(
+                  isSuccess ? `Dashboard restarted (stale code detected) at http://localhost:${existing.port}` : result,
+                  isSuccess ? "success" : "warning",
+                  "Dashboard",
+                );
+                return isSuccess
+                  ? `Dashboard restarted with fresh code at http://localhost:${existing.port}`
+                  : result;
+              } finally {
+                activating = false;
+              }
+            }
+
+            // Server is current — connect or report already running
             if (!activated) {
               // Server is running but plugin isn't connected — connect now
               const result = await startupSequence(directory, projectName, $, existing.port);

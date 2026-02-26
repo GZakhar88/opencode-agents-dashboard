@@ -8,7 +8,7 @@
  * Contents: JSON { pid, port, startedAt }
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, truncateSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 
@@ -25,10 +25,42 @@ export interface PidFileData {
 
 const PID_DIR = join(homedir(), ".cache", "opencode");
 const PID_FILE = join(PID_DIR, "opencode-dashboard.pid");
+const LOG_FILE = join(PID_DIR, "opencode-dashboard.log");
+
+const MAX_LOG_SIZE_BYTES = 1_048_576; // 1 MB
 
 /** Get the PID file path (exposed for testing) */
 export function getPidFilePath(): string {
   return PID_FILE;
+}
+
+/** Get the server log file path */
+export function getLogFilePath(): string {
+  return LOG_FILE;
+}
+
+/**
+ * Prepare the server log file for writing.
+ * Ensures the directory exists and truncates the file if it exceeds 1 MB.
+ * Returns a file descriptor opened in append mode, suitable for Bun.spawn stdio.
+ */
+export function openLogFile(): number {
+  if (!existsSync(PID_DIR)) {
+    mkdirSync(PID_DIR, { recursive: true });
+  }
+
+  // Simple size management: truncate if over 1 MB
+  try {
+    const st = statSync(LOG_FILE);
+    if (st.size > MAX_LOG_SIZE_BYTES) {
+      truncateSync(LOG_FILE, 0);
+    }
+  } catch {
+    // File doesn't exist yet — that's fine
+  }
+
+  // Open in append mode, create if not exists
+  return openSync(LOG_FILE, "a");
 }
 
 // --- Write ---

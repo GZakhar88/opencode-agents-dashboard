@@ -21,9 +21,10 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import type { BeadRecord, BeadDiff, ColumnConfig } from "../shared/types";
 import { computeBuildHash } from "../shared/version";
-import { isServerRunning, readPid, writePid, removePid } from "../server/pid";
+import { isServerRunning, readPid, writePid, removePid, openLogFile, getLogFilePath } from "../server/pid";
 import { join, resolve } from "path";
 import { readdir, readFile, copyFile, mkdir, stat } from "fs/promises";
+import { closeSync } from "fs";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -581,17 +582,28 @@ async function spawnServer(port: number): Promise<boolean> {
   log(`Server not running, starting on port ${port}...`);
   log(`Spawning: ${bunPath} run ${SERVER_ENTRY}`);
 
+  let logFd: number | undefined;
+  try {
+    logFd = openLogFile();
+  } catch {
+    // If log file can't be opened, fall back to ignore
+  }
+
   try {
     const proc = Bun.spawn([bunPath, "run", SERVER_ENTRY], {
       detached: true,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
       env: { ...process.env, DASHBOARD_PORT: String(port) },
     });
     proc.unref();
-    log(`Spawned server process (PID: ${proc.pid})`);
+    log(`Spawned server process (PID: ${proc.pid}), logs: ${getLogFilePath()}`);
   } catch (err) {
     logError(`Failed to spawn server process:`, err);
     return false;
+  } finally {
+    if (logFd !== undefined) {
+      try { closeSync(logFd); } catch {}
+    }
   }
 
   // Poll for readiness

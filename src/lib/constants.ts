@@ -27,6 +27,15 @@ export const PRIORITY_COLORS: Record<number, string> = {
   4: "bg-gray-400 text-white",      // P4 - Lowest
 };
 
+/** Priority label mapping */
+export const PRIORITY_LABELS: Record<number, string> = {
+  0: "P0",
+  1: "P1",
+  2: "P2",
+  3: "P3",
+  4: "P4",
+};
+
 /** Connection status types */
 export type ConnectionStatus = "connected" | "disconnected" | "reconnecting";
 

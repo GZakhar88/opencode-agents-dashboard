@@ -14,7 +14,7 @@
 import type { BeadState } from "@shared/types";
 import { motion } from "framer-motion";
 import { AlertCircle } from "lucide-react";
-import { PRIORITY_COLORS } from "@/lib/constants";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -28,15 +28,6 @@ import { cn } from "@/lib/utils";
 interface BeadCardProps {
   bead: BeadState;
 }
-
-/** Priority label mapping */
-const PRIORITY_LABELS: Record<number, string> = {
-  0: "P0",
-  1: "P1",
-  2: "P2",
-  3: "P3",
-  4: "P4",
-};
 
 /** Framer Motion animation variants for card enter/exit */
 const cardVariants = {

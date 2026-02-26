@@ -2,7 +2,11 @@
  * ProjectSection — Self-contained project card for the grid layout.
  *
  * Displays: project name, directory path, connection status badge.
- * Renders all pipelines for this project, each with PipelineHeader + Board.
+ * Renders all pipelines for this project, each with:
+ * - PipelineHeader (title, status, expand/collapse toggle)
+ * - PipelineProgress (collapsed: segmented progress bar + active bead label)
+ * - Board (expanded: filtered Kanban with only non-empty + active columns)
+ *
  * Uses shadcn Collapsible for expand/collapse within the card.
  *
  * Visual weight is proportional to project importance:
@@ -22,6 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { PipelineHeader } from "@/components/PipelineHeader";
+import { PipelineProgress } from "@/components/PipelineProgress";
 import { Board } from "@/components/Board";
 import { formatLastSeen } from "@/lib/format";
 import { FOCUS_RING } from "@/lib/styles";
@@ -202,6 +207,14 @@ export function ProjectSection({ project }: ProjectSectionProps) {
                     isExpanded={expandedPipelines.has(pipeline.id)}
                     onToggle={() => togglePipeline(pipeline.id)}
                   />
+                  {/* Collapsed view: segmented progress bar */}
+                  {!expandedPipelines.has(pipeline.id) && (
+                    <PipelineProgress
+                      pipeline={pipeline}
+                      columns={project.columns}
+                    />
+                  )}
+                  {/* Expanded view: filtered Kanban board */}
                   <Board 
                     pipeline={pipeline}
                     isExpanded={expandedPipelines.has(pipeline.id)}

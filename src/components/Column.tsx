@@ -2,13 +2,16 @@
  * Column — Single Kanban column displaying beads for one stage.
  *
  * Shows: column label header with count, list of bead cards.
- * In compact mode, only the first bead is shown.
- * In expanded mode, all beads are shown at natural height.
+ * All beads are shown at natural height (compact mode is handled
+ * by the PipelineProgress component instead).
  * Error column gets distinct warning styling for high visibility.
  * Wraps card list in AnimatePresence for exit animations.
  *
  * Column accent color is driven by ColumnConfig.color (hex) from the server,
  * applied as an inline border-top style for full dynamic color support.
+ *
+ * Min-width is 200px in the filtered expanded Kanban context to allow
+ * more columns to fit without horizontal scrolling.
  */
 
 import type { BeadState } from "@shared/types";
@@ -22,24 +25,20 @@ interface ColumnProps {
   label: string;
   color: string;
   beads: BeadState[];
-  isCompact: boolean;
 }
 
-export function Column({ columnId, label, color, beads, isCompact }: ColumnProps) {
+export function Column({ columnId, label, color, beads }: ColumnProps) {
   const isErrorColumn = columnId === "error";
   const hasErrors = isErrorColumn && beads.length > 0;
 
   /** Shared color for error column text (icon, heading, badge) */
   const headerColor = hasErrors ? "text-red-400" : "text-muted-foreground";
 
-  // In compact mode, only show the first bead
-  const visibleBeads = isCompact ? beads.slice(0, 1) : beads;
-
   return (
     <div
       aria-label={`${label} column with ${beads.length} bead${beads.length !== 1 ? "s" : ""}`}
       className={cn(
-        "flex w-[240px] min-w-[240px] flex-col rounded-lg border border-t-2 bg-muted/30",
+        "flex min-w-[200px] flex-1 flex-col rounded-lg border border-t-2 bg-muted/30",
         hasErrors && "border-red-500/30 bg-red-500/[0.03]",
       )}
       style={{
@@ -86,7 +85,7 @@ export function Column({ columnId, label, color, beads, isCompact }: ColumnProps
         className="flex flex-col gap-2 px-2 pb-2"
       >
         <AnimatePresence mode="popLayout">
-          {visibleBeads.map((bead) => (
+          {beads.map((bead) => (
             <div key={bead.id} role="listitem">
               <BeadCard bead={bead} />
             </div>

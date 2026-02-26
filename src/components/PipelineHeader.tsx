@@ -1,13 +1,17 @@
 /**
- * PipelineHeader — Pipeline title and status badge.
+ * PipelineHeader — Pipeline title, status badge, and expand/collapse toggle.
  *
  * Displays: pipeline title, status badge (LIVE/IDLE/DONE), expand/collapse toggle.
  * Status colors: active=green, idle=gray, done=blue.
+ *
+ * The toggle switches between:
+ * - Collapsed: segmented progress bar (PipelineProgress)
+ * - Expanded: filtered Kanban board (Board)
  */
 
 import type { Pipeline, PipelineStatus } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Layers, BarChart3 } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
@@ -45,19 +49,22 @@ export function PipelineHeader({ pipeline, isExpanded, onToggle }: PipelineHeade
         type="button"
         onClick={onToggle}
         className={cn(
-          "flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          "flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           FOCUS_RING,
         )}
-        aria-label={isExpanded ? "Collapse board" : "Expand board"}
+        aria-label={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
+        title={isExpanded ? "Collapse to progress bar" : "Expand to Kanban board"}
       >
         {isExpanded ? (
           <>
             <ChevronUp className="h-3 w-3" />
+            <BarChart3 className="h-3 w-3" />
             <span>Collapse</span>
           </>
         ) : (
           <>
             <ChevronDown className="h-3 w-3" />
+            <Layers className="h-3 w-3" />
             <span>Expand</span>
           </>
         )}

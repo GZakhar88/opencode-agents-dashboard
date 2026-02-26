@@ -78,6 +78,9 @@
   .animate-agent-pulse {
     animation: none;
   }
+  .animate-pulse {
+    animation: none;
+  }
 }
 
 /* ============================================================

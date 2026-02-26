@@ -12,6 +12,7 @@ export function cn(...inputs: ClassValue[]) {
  * Returns a neutral gray fallback if parsing fails.
  */
 export function hexToRgba(hex: string, alpha: number): string {
+  if (!hex) return `rgba(128, 128, 128, ${alpha})`;
   const cleaned = hex.replace("#", "");
   const r = parseInt(cleaned.substring(0, 2), 16);
   const g = parseInt(cleaned.substring(2, 4), 16);

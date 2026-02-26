@@ -403,6 +403,26 @@ export class StateManager {
     return null;
   }
 
+  /** Remove a project entirely from state (by pluginId). Returns the removed project or null. */
+  removeProject(pluginId: string): ProjectState | null {
+    for (const [projectPath, project] of this.state.projects) {
+      if (project.pluginId === pluginId) {
+        this.state.projects.delete(projectPath);
+        this.activeAgents.delete(projectPath);
+        // Clear any pipeline hide timers for this project
+        const timer = this.pipelineHideTimers.get(projectPath);
+        if (timer) {
+          clearTimeout(timer);
+          this.pipelineHideTimers.delete(projectPath);
+        }
+        this._lastVisibleColumnsKey.delete(projectPath);
+        this.schedulePersist();
+        return project;
+      }
+    }
+    return null;
+  }
+
   /** Update heartbeat for a plugin */
   updateHeartbeat(pluginId: string): boolean {
     for (const [, project] of this.state.projects) {

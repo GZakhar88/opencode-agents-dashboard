@@ -137,17 +137,15 @@
    Project Card Grid Layout
    ============================================================ */
 
-/* Responsive grid: 1 col on mobile → 2 cols → 3+ on wide screens */
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+/* Vertical stack of project rows — each row handles its own column layout */
+.project-rows {
+  display: flex;
+  flex-direction: column;
   gap: 1.25rem;
 }
 
-/* Mobile (< 640px): single column, full-width cards, tighter spacing */
 @media (max-width: 639px) {
-  .project-grid {
-    grid-template-columns: 1fr;
+  .project-rows {
     gap: 0.75rem;
   }
 }

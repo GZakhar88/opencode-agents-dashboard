@@ -2,17 +2,23 @@
  * LoadingSkeleton — Placeholder skeleton shown during initial SSE connection.
  *
  * Mimics the layout of the project card grid to avoid layout shift
- * when data loads. Shows 3 skeleton cards in the responsive grid.
+ * when data loads. Shows 3 skeleton cards in a responsive row.
  *
  * On mobile (< 640px), shows progress bar skeleton instead of board columns.
  */
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProjectRow } from "@/components/ProjectRow";
+import { useMaxColumns } from "@/hooks/useBreakpoint";
 
 export function LoadingSkeleton() {
+  const maxCols = useMaxColumns();
+  const skeletonCount = Math.min(3, maxCols);
+
   return (
-    <div className="project-grid">
-      {Array.from({ length: 3 }).map((_, cardIndex) => (
+    <div className="project-rows">
+      <ProjectRow columns={skeletonCount}>
+      {Array.from({ length: skeletonCount }).map((_, cardIndex) => (
         <div
           key={cardIndex}
           className="project-card"
@@ -63,6 +69,7 @@ export function LoadingSkeleton() {
           </div>
         </div>
       ))}
+      </ProjectRow>
     </div>
   );
 }

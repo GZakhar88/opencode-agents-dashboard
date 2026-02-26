@@ -21,7 +21,8 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type { ProjectState } from "@shared/types";
 import { useEventSource } from "@/hooks/useEventSource";
 import { useBoardState } from "@/hooks/useBoardState";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useMaxColumns } from "@/hooks/useBreakpoint";
+import { ProjectRow } from "@/components/ProjectRow";
 import { MotionConfig } from "framer-motion";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ReconnectBanner } from "@/components/ReconnectBanner";
@@ -36,6 +37,15 @@ import { cn } from "@/lib/utils";
 
 /** Stale threshold: projects disconnected longer than this are hidden by default */
 const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+
+/** Split an array into chunks of at most `size` elements */
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export default function App() {
   return (
@@ -96,7 +106,8 @@ function projectSortWeight(project: ProjectState, now: number): number {
  */
 function DashboardApp() {
   const { state, dispatch } = useBoardState();
-  const isMobile = useIsMobile();
+  const maxCols = useMaxColumns();
+  const isMobile = maxCols === 1;
 
   const { status, reconnect } = useEventSource({
     onEvent: dispatch,
@@ -274,14 +285,18 @@ function DashboardApp() {
               projects.length === 0 && <EmptyState />}
 
             {displayedProjects.length > 0 && (
-              <div className="project-grid">
-                {displayedProjects.map((project) => (
-                  <ProjectSection
-                    key={project.projectPath}
-                    project={project}
-                    isCompleted={isProjectCompleted(project)}
-                    isMobile={isMobile}
-                  />
+              <div className="project-rows">
+                {chunkArray(displayedProjects, maxCols).map((rowProjects, i) => (
+                  <ProjectRow key={i} columns={rowProjects.length}>
+                    {rowProjects.map((project) => (
+                      <ProjectSection
+                        key={project.projectPath}
+                        project={project}
+                        isCompleted={isProjectCompleted(project)}
+                        isMobile={isMobile}
+                      />
+                    ))}
+                  </ProjectRow>
                 ))}
               </div>
             )}
@@ -293,6 +308,7 @@ function DashboardApp() {
                 showStale={showStale}
                 onToggle={() => setShowStale(!showStale)}
                 isMobile={isMobile}
+                maxCols={maxCols}
               />
             )}
           </main>
@@ -313,11 +329,13 @@ function StaleProjectsFooter({
   showStale,
   onToggle,
   isMobile,
+  maxCols,
 }: {
   projects: ProjectState[];
   showStale: boolean;
   onToggle: () => void;
   isMobile: boolean;
+  maxCols: number;
 }) {
   const count = projects.length;
 
@@ -349,15 +367,19 @@ function StaleProjectsFooter({
 
       {/* Expanded stale projects list */}
       {showStale && (
-        <div className="mt-3 project-grid stale-projects-grid">
-          {projects.map((project) => (
-            <ProjectSection
-              key={project.projectPath}
-              project={project}
-              isCompleted={isProjectCompleted(project)}
-              isStale
-              isMobile={isMobile}
-            />
+        <div className="mt-3 project-rows stale-projects-grid">
+          {chunkArray(projects, maxCols).map((rowProjects, i) => (
+            <ProjectRow key={i} columns={rowProjects.length}>
+              {rowProjects.map((project) => (
+                <ProjectSection
+                  key={project.projectPath}
+                  project={project}
+                  isCompleted={isProjectCompleted(project)}
+                  isStale
+                  isMobile={isMobile}
+                />
+              ))}
+            </ProjectRow>
           ))}
         </div>
       )}

@@ -139,7 +139,7 @@ export function ProjectSection({ project, isCompleted = false, isStale = false, 
             type="button"
             aria-expanded={isOpen}
             className={cn(
-              "flex w-full items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-accent/30 sm:px-4",
+              "flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-3.5 text-left transition-colors hover:bg-accent/30 sm:px-4",
               "min-h-[44px]",
               FOCUS_RING,
             )}
@@ -170,7 +170,7 @@ export function ProjectSection({ project, isCompleted = false, isStale = false, 
             )}
 
             {/* Project name + path */}
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 basis-[200px]">
               <h2 className="truncate text-sm font-semibold text-foreground">
                 {project.projectName}
               </h2>

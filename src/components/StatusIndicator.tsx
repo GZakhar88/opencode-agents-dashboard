@@ -8,6 +8,8 @@
  *   disconnected → red
  *
  * Supports compact mode (dot-only) for mobile header.
+ * Badge transitions smoothly between color states via CSS transitions
+ * on background, border-color, and color properties.
  */
 
 import type { ConnectionStatus } from "@shared/types";
@@ -64,7 +66,10 @@ export function StatusIndicator({ status, compact = false }: StatusIndicatorProp
             role="status"
             tabIndex={0}
           >
-            <span className={cn("h-2.5 w-2.5 rounded-full", config.dot)} />
+            <span className={cn(
+              "h-2.5 w-2.5 rounded-full transition-colors duration-500 ease-in-out",
+              config.dot,
+            )} />
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs">
@@ -75,8 +80,17 @@ export function StatusIndicator({ status, compact = false }: StatusIndicatorProp
   }
 
   return (
-    <Badge variant="outline" className={cn("gap-1.5 font-mono text-[11px]", config.className)}>
-      <span className={cn("h-2 w-2 rounded-full", config.dot)} />
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1.5 font-mono text-[11px] transition-colors duration-500 ease-in-out",
+        config.className,
+      )}
+    >
+      <span className={cn(
+        "h-2 w-2 rounded-full transition-colors duration-500 ease-in-out",
+        config.dot,
+      )} />
       {config.label}
     </Badge>
   );

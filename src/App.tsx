@@ -13,6 +13,8 @@
  * - Active projects: connected OR disconnected < 1 hour — shown by default
  * - Stale projects: disconnected > 1 hour — hidden by default, revealed via link
  * - Completed projects: all beads done — dimmed with checkmark overlay
+ *
+ * Dynamic browser tab title shows active project count for glanceability.
  */
 
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -28,7 +30,7 @@ import { GlobalStats } from "@/components/GlobalStats";
 import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Link2Off, ServerOff, Eye, EyeOff, ChevronDown, Clock, ChevronRight, Activity } from "lucide-react";
+import { ServerOff, Eye, EyeOff, ChevronDown, Clock, ChevronRight, Activity } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
@@ -166,6 +168,30 @@ function DashboardApp() {
 
     return { activeProjects: active, completedProjects: completed, staleProjects: stale };
   }, [state.projects, now]);
+
+  // Dynamic document.title — shows active count for glanceable browser tab
+  useEffect(() => {
+    const activeCount = activeProjects.filter((p) => {
+      for (const pipeline of p.pipelines.values()) {
+        if (pipeline.status === "active") return true;
+      }
+      return false;
+    }).length;
+
+    if (status === "disconnected" && projects.length === 0) {
+      document.title = "Offline | OpenCode";
+    } else if (activeCount > 0) {
+      document.title = `${activeCount} active | OpenCode`;
+    } else if (projects.length > 0) {
+      document.title = `${projects.length} connected | OpenCode`;
+    } else {
+      document.title = "OpenCode Dashboard";
+    }
+
+    return () => {
+      document.title = "OpenCode Dashboard";
+    };
+  }, [activeProjects, projects.length, status]);
 
   // Build the displayed project list based on filter states
   // Active projects are always shown. Completed projects only if toggled.
@@ -396,19 +422,15 @@ function MobileStatsToggle({ projects }: { projects: ProjectState[] }) {
   );
 }
 
-/** Empty state shown when no projects are connected */
+/** Empty state — contextual, minimal text. No heavy icons or verbose copy. */
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-24">
-      <div className="mb-4 rounded-full bg-muted p-4">
-        <Link2Off className="h-8 w-8 text-muted-foreground" />
-      </div>
-      <h2 className="mb-1 text-lg font-semibold text-foreground">
-        No projects connected
-      </h2>
+    <div className="flex flex-col items-center justify-center py-32">
       <p className="text-sm text-muted-foreground">
-        Start an OpenCode session with the dashboard plugin to see agent
-        activity here.
+        Waiting for projects&hellip;
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground/60">
+        Start an OpenCode session to see activity here
       </p>
     </div>
   );

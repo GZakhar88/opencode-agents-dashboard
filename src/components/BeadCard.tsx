@@ -11,11 +11,12 @@
  *
  * Animated with Framer Motion:
  * - `layoutId` enables smooth position transitions between columns
- * - Fade/scale on mount and unmount via initial/animate/exit
- * - Subtle pulse ring when an agent is actively working on the bead
+ * - Directional trail animation: cards slide in from the left when entering
+ *   a later stage and from the right when moving backward (e.g., error → retry)
+ * - Subtle breathing ring when an agent is actively working on the bead
  */
 
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import type { BeadState, ColumnConfig } from "@shared/types";
 import { motion } from "framer-motion";
 import {
@@ -50,11 +51,19 @@ interface BeadCardProps {
   columns?: ColumnConfig[];
 }
 
-/** Framer Motion animation variants for card enter/exit */
-const cardVariants = {
-  hidden: { opacity: 0, scale: 0.95 },
-  visible: { opacity: 1, scale: 1 },
-} as const;
+/** Horizontal slide distance for directional enter/exit */
+const SLIDE_X = 24;
+
+/**
+ * Module-level stage history per bead ID.
+ * Persists across unmount/remount cycles so that when a bead moves from
+ * column A → column B (unmount + mount), the new mount can compute
+ * direction by comparing against the bead's *previous* stage.
+ *
+ * Bounded to prevent memory leaks: entries are cleaned up when the bead
+ * reaches "done" or "error" terminal states.
+ */
+const prevStageMap = new Map<string, string>();
 
 /** Spring transition for layout animations (natural card movement) */
 const cardTransition = {
@@ -67,7 +76,7 @@ const cardTransition = {
 const ERROR_CARD_STYLES =
   "border-status-error/60 bg-status-error/5 ring-1 ring-status-error/20 shadow-[0_0_8px_rgba(239,68,68,0.1)]";
 
-/** Active agent card: amber ring + animated glow pulse */
+/** Active agent card: amber ring + animated breathing ring */
 const ACTIVE_CARD_STYLES = "ring-1 ring-status-warning/60 animate-agent-pulse";
 
 /** Map issue type string to Lucide icon component */
@@ -157,6 +166,30 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
   const isActive = !!bead.agentSessionId;
   const showElapsed =
     bead.stage !== "ready" && bead.stage !== "done";
+
+  // Compute directional slide based on stage change.
+  // Uses module-level prevStageMap to survive unmount/remount when the bead
+  // moves between Column components.
+  const direction = useMemo(() => {
+    if (!columns || columns.length === 0) return 0;
+    const prev = prevStageMap.get(bead.id);
+    const curr = bead.stage;
+    if (!prev || prev === curr) return 0;
+
+    const prevOrder = columns.find((c) => c.id === prev)?.order ?? 0;
+    const currOrder = columns.find((c) => c.id === curr)?.order ?? 0;
+    return currOrder > prevOrder ? 1 : currOrder < prevOrder ? -1 : 0;
+  }, [bead.id, bead.stage, columns]);
+
+  // Persist current stage for next transition; clean up terminal states
+  useEffect(() => {
+    prevStageMap.set(bead.id, bead.stage);
+    // Cleanup terminal states after animation completes to prevent memory leaks
+    if (bead.stage === "done") {
+      const timer = setTimeout(() => prevStageMap.delete(bead.id), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [bead.id, bead.stage]);
 
   // Issue type icon
   const IssueIcon = ISSUE_TYPE_ICON_MAP[bead.issueType] ?? Circle;
@@ -276,10 +309,9 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
   return (
     <motion.div
       layoutId={bead.id}
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="hidden"
+      initial={{ opacity: 0, x: direction * SLIDE_X, scale: 0.97 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: direction * -SLIDE_X, scale: 0.97 }}
       transition={cardTransition}
     >
       <Tooltip>

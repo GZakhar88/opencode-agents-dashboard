@@ -41,6 +41,8 @@ npx opencode-dashboard start
 
 The dashboard will be available at `http://localhost:3333`.
 
+After the first activation, the dashboard **auto-starts on subsequent OpenCode sessions** — you don't need to run `/dashboard-start` again. This works across terminals: if you open a second OpenCode session while the dashboard is already running, it connects automatically.
+
 ### Check Status
 
 ```
@@ -64,6 +66,8 @@ Or via CLI:
 ```bash
 npx opencode-dashboard stop
 ```
+
+This also **disables auto-start** — the dashboard will stay dormant on future sessions until you explicitly run `/dashboard-start` again.
 
 ### Custom Port
 
@@ -90,7 +94,7 @@ OpenCode Plugin (plugin/index.ts)
 ```
 
 1. **Plugin** -- An OpenCode plugin that hooks into agent lifecycle events, discovers configured agents, tracks bead state via `bd list --json`, and pushes structured events to the server. Registers custom tools (`dashboard_start`, `dashboard_stop`, `dashboard_status`, `dashboard_open`) for controlling the dashboard from within OpenCode.
-2. **Server** -- A Bun HTTP server that aggregates state from connected plugins, persists it to disk, serves the dashboard frontend, and broadcasts updates to browser clients via Server-Sent Events (SSE).
+2. **Server** -- A Bun HTTP server that aggregates state from connected plugins, persists it to disk, serves the dashboard frontend, and broadcasts updates to browser clients via Server-Sent Events (SSE). The server automatically shuts down after 5 minutes of inactivity (no connected plugins or browser clients) to avoid leaving orphaned processes. Multiple OpenCode sessions share a single server instance — it only shuts down when all sessions have disconnected.
 3. **Dashboard** -- A React SPA that renders a dynamic Kanban board with real-time updates, animated card transitions, and connection resilience.
 
 ### Kanban Columns
@@ -220,6 +224,7 @@ bun test
 | `server/state.test.ts` | Server state manager (event processing, persistence) |
 | `server/routes.test.ts` | HTTP route handlers (register, event, heartbeat) |
 | `server/sse.test.ts` | SSE client management and broadcasting |
+| `server/pid.test.ts` | PID file and autostart marker management |
 | `server/diffBeadState.test.ts` | Bead snapshot diffing algorithm |
 
 ### Building
@@ -235,6 +240,7 @@ bun run build:check  # Run TypeScript type checking
 |----------|---------|-------------|
 | `DASHBOARD_PORT` | `3333` | Port for the dashboard server |
 | `DASHBOARD_DEBUG` | (unset) | Set to `1` to enable verbose plugin logging to stderr |
+| `DASHBOARD_IDLE_TIMEOUT_MS` | `300000` (5 min) | Idle auto-shutdown timeout in milliseconds. Set to `0` to disable |
 
 ## Project Structure
 
@@ -323,6 +329,19 @@ The server saves state to `server/.dashboard-state.json`. Delete this file to st
 ```bash
 rm server/.dashboard-state.json
 ```
+
+### Dashboard keeps auto-starting (or won't auto-start)
+
+The plugin stores an autostart marker at `~/.cache/opencode/opencode-dashboard.autostart`. To reset auto-start behavior:
+
+```bash
+# Disable auto-start
+rm ~/.cache/opencode/opencode-dashboard.autostart
+
+# Or just run /dashboard-stop — it clears the marker for you
+```
+
+If the dashboard *should* auto-start but isn't, run `/dashboard-start` once to re-create the marker.
 
 ## License
 

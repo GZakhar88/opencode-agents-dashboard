@@ -8,9 +8,14 @@
  * - ErrorBoundary: catches React rendering errors, prevents white screen
  * - MotionConfig: respects OS-level prefers-reduced-motion setting
  * - ReconnectBanner: visible reconnection/disconnection notification
+ *
+ * Project filtering logic (Phase 6):
+ * - Active projects: connected OR disconnected < 1 hour — shown by default
+ * - Stale projects: disconnected > 1 hour — hidden by default, revealed via link
+ * - Completed projects: all beads done — dimmed with checkmark overlay
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { ProjectState } from "@shared/types";
 import { useEventSource } from "@/hooks/useEventSource";
 import { useBoardState } from "@/hooks/useBoardState";
@@ -22,9 +27,12 @@ import { GlobalStats } from "@/components/GlobalStats";
 import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Link2Off, ServerOff, Eye, EyeOff, ChevronDown } from "lucide-react";
+import { Link2Off, ServerOff, Eye, EyeOff, ChevronDown, Clock, ChevronRight } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+
+/** Stale threshold: projects disconnected longer than this are hidden by default */
+const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
 
 export default function App() {
   return (
@@ -36,18 +44,47 @@ export default function App() {
 
 /**
  * Check if a project is completed (has zero non-done beads).
- * A completed project is one where all beads are in "done" stage,
- * or has no beads at all.
+ * A completed project is one where all beads are in "done" stage.
+ * Projects with no beads are NOT considered completed (they're just empty).
  */
-function isProjectCompleted(project: ProjectState): boolean {
+export function isProjectCompleted(project: ProjectState): boolean {
+  let hasBead = false;
   for (const pipeline of project.pipelines.values()) {
     for (const bead of pipeline.beads.values()) {
+      hasBead = true;
       if (bead.stage !== "done") {
         return false;
       }
     }
   }
-  return true;
+  return hasBead;
+}
+
+/**
+ * Check if a project is stale (disconnected for longer than the threshold).
+ * Connected projects are never stale.
+ */
+export function isProjectStale(project: ProjectState, now: number): boolean {
+  if (project.connected) return false;
+  return (now - project.lastHeartbeat) > STALE_THRESHOLD_MS;
+}
+
+/**
+ * Sort weight for visual ordering of projects.
+ * Higher weight = shown first.
+ *   3 = active (connected, has active pipelines)
+ *   2 = idle (connected, no active pipelines)
+ *   1 = recently disconnected (< 1 hour)
+ *   0 = stale (disconnected > 1 hour)
+ */
+function projectSortWeight(project: ProjectState, now: number): number {
+  if (!project.connected) {
+    return isProjectStale(project, now) ? 0 : 1;
+  }
+  for (const pipeline of project.pipelines.values()) {
+    if (pipeline.status === "active") return 3;
+  }
+  return 2;
 }
 
 /**
@@ -63,35 +100,88 @@ function DashboardApp() {
 
   // Toggle state for showing/hiding completed projects (persisted to localStorage)
   const [showCompleted, setShowCompleted] = useState(() => {
-    const stored = localStorage.getItem("dashboard:showCompleted");
-    return stored === "true";
+    try {
+      return localStorage.getItem("dashboard:showCompleted") === "true";
+    } catch {
+      return false;
+    }
   });
 
-  // Persist toggle state to localStorage
+  // Toggle state for showing/hiding stale projects (persisted to localStorage)
+  const [showStale, setShowStale] = useState(() => {
+    try {
+      return localStorage.getItem("dashboard:showStale") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  // Persist toggle states to localStorage
   useEffect(() => {
-    localStorage.setItem("dashboard:showCompleted", String(showCompleted));
+    try {
+      localStorage.setItem("dashboard:showCompleted", String(showCompleted));
+    } catch {
+      // Storage full or unavailable — silently ignore
+    }
   }, [showCompleted]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("dashboard:showStale", String(showStale));
+    } catch {
+      // Storage full or unavailable — silently ignore
+    }
+  }, [showStale]);
+
+  // Tick every 30s to re-evaluate stale detection based on elapsed time
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const projects = Array.from(state.projects.values());
-  
-  // Split projects into active and completed
-  const activeProjects = projects.filter((p) => !isProjectCompleted(p));
-  const completedProjects = projects.filter((p) => isProjectCompleted(p));
-  
-  // Projects to display based on toggle state, sorted by visual weight:
-  // active (connected with active pipelines) > idle (connected) > disconnected
-  const unsorted = showCompleted ? projects : activeProjects;
-  const displayedProjects = [...unsorted].sort((a, b) => {
-    const weight = (p: ProjectState) => {
-      if (!p.connected) return 0;
-      for (const pipeline of p.pipelines.values()) {
-        if (pipeline.status === "active") return 2;
+
+  // Categorize projects into active, completed, and stale
+  // Depends on state.projects (Map reference) rather than the derived array
+  // to avoid re-computing on every render.
+  const { activeProjects, completedProjects, staleProjects } = useMemo(() => {
+    const all = Array.from(state.projects.values());
+    const active: ProjectState[] = [];
+    const completed: ProjectState[] = [];
+    const stale: ProjectState[] = [];
+
+    for (const p of all) {
+      if (isProjectStale(p, now)) {
+        // Stale projects are always in the stale bucket regardless of completion
+        stale.push(p);
+      } else if (isProjectCompleted(p)) {
+        completed.push(p);
+      } else {
+        active.push(p);
       }
-      return 1;
-    };
-    return weight(b) - weight(a);
-  });
-  
+    }
+
+    return { activeProjects: active, completedProjects: completed, staleProjects: stale };
+  }, [state.projects, now]);
+
+  // Build the displayed project list based on filter states
+  // Active projects are always shown. Completed projects only if toggled.
+  const displayedProjects = useMemo(() => {
+    const result = [...activeProjects];
+    if (showCompleted) {
+      result.push(...completedProjects);
+    }
+
+    // Sort by visual weight (active > idle > recently disconnected)
+    return result.sort((a, b) => projectSortWeight(b, now) - projectSortWeight(a, now));
+  }, [activeProjects, completedProjects, showCompleted, now]);
+
+  // Stale projects are shown separately (in a collapsed list at the bottom)
+  const sortedStaleProjects = useMemo(() => {
+    return [...staleProjects].sort((a, b) => b.lastHeartbeat - a.lastHeartbeat);
+  }, [staleProjects]);
+
   const isInitialLoad = status === "connecting" && projects.length === 0;
 
   // Detect permanent failure: disconnected with no data
@@ -151,14 +241,86 @@ function DashboardApp() {
             {displayedProjects.length > 0 && (
               <div className="project-grid">
                 {displayedProjects.map((project) => (
-                  <ProjectSection key={project.projectPath} project={project} />
+                  <ProjectSection
+                    key={project.projectPath}
+                    project={project}
+                    isCompleted={isProjectCompleted(project)}
+                  />
                 ))}
               </div>
+            )}
+
+            {/* Stale projects footer — collapsed list of disconnected > 1h projects */}
+            {sortedStaleProjects.length > 0 && (
+              <StaleProjectsFooter
+                projects={sortedStaleProjects}
+                showStale={showStale}
+                onToggle={() => setShowStale(!showStale)}
+              />
             )}
           </main>
         </div>
       </TooltipProvider>
     </MotionConfig>
+  );
+}
+
+/**
+ * StaleProjectsFooter — Compact footer showing count of stale (disconnected > 1h) projects.
+ *
+ * When collapsed: shows "N stale projects" link.
+ * When expanded: reveals the stale projects in a dimmed list.
+ */
+function StaleProjectsFooter({
+  projects,
+  showStale,
+  onToggle,
+}: {
+  projects: ProjectState[];
+  showStale: boolean;
+  onToggle: () => void;
+}) {
+  const count = projects.length;
+
+  return (
+    <div className="mt-8">
+      {/* Stale projects toggle link */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "group mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/50 hover:text-muted-foreground",
+          FOCUS_RING,
+        )}
+        aria-expanded={showStale}
+        aria-label={`${showStale ? "Hide" : "Show"} ${count} stale project${count !== 1 ? "s" : ""}`}
+      >
+        <Clock className="h-3 w-3" />
+        <span className="font-medium">
+          {count} stale project{count !== 1 ? "s" : ""}
+        </span>
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 transition-transform duration-200",
+            showStale && "rotate-90",
+          )}
+        />
+      </button>
+
+      {/* Expanded stale projects list */}
+      {showStale && (
+        <div className="mt-3 project-grid stale-projects-grid">
+          {projects.map((project) => (
+            <ProjectSection
+              key={project.projectPath}
+              project={project}
+              isCompleted={isProjectCompleted(project)}
+              isStale
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

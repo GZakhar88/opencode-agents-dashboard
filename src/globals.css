@@ -198,6 +198,43 @@
   filter: saturate(0.85);
 }
 
+/* Completed project card — dimmed with subtle green accent */
+.project-card[data-status="completed"] {
+  opacity: 0.55;
+  border-color: hsl(var(--status-live) / 0.15);
+  filter: saturate(0.6);
+}
+
+.project-card[data-status="completed"]:hover {
+  opacity: 0.7;
+  filter: saturate(0.75);
+}
+
+.project-card[data-status="completed"]::before {
+  background: linear-gradient(90deg, hsl(var(--status-live) / 0.3), hsl(var(--status-live) / 0.1));
+}
+
+/* Stale project card — maximally recessed, nearly invisible until hovered */
+.project-card[data-status="stale"] {
+  opacity: 0.4;
+  border-color: hsl(var(--border) / 0.5);
+  filter: saturate(0.4) brightness(0.95);
+}
+
+.project-card[data-status="stale"]:hover {
+  opacity: 0.65;
+  filter: saturate(0.7) brightness(1);
+}
+
+.project-card[data-status="stale"]::before {
+  background: hsl(var(--muted-foreground) / 0.15);
+}
+
+/* Stale projects grid — slightly smaller gap */
+.stale-projects-grid {
+  gap: 0.75rem;
+}
+
 /* Card top accent bar — 2px color indicator */
 .project-card::before {
   content: "";

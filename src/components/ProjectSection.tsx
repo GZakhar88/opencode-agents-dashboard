@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import type { ProjectState } from "@shared/types";
-import { ChevronRight, Activity, Pause, WifiOff } from "lucide-react";
+import { ChevronRight, Activity, Pause, WifiOff, CheckCircle2 } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -34,6 +34,10 @@ import { cn } from "@/lib/utils";
 
 interface ProjectSectionProps {
   project: ProjectState;
+  /** Whether all beads in this project are done */
+  isCompleted?: boolean;
+  /** Whether this project is in the stale bucket (disconnected > 1h) */
+  isStale?: boolean;
 }
 
 /**
@@ -74,11 +78,14 @@ function getBeadSummary(project: ProjectState) {
   return { total, active, done, error };
 }
 
-export function ProjectSection({ project }: ProjectSectionProps) {
+export function ProjectSection({ project, isCompleted = false, isStale = false }: ProjectSectionProps) {
   const [isOpen, setIsOpen] = useState(true);
   const pipelines = Array.from(project.pipelines.values());
   const cardStatus = getCardStatus(project);
   const beadSummary = useMemo(() => getBeadSummary(project), [project]);
+  
+  // Derive data-status attribute: stale and completed override the connection-based status
+  const dataStatus = isStale ? "stale" : isCompleted ? "completed" : cardStatus;
   
   // Track expanded/compact state per pipeline (default: compact)
   const [expandedPipelines, setExpandedPipelines] = useState<Set<string>>(() => {
@@ -122,7 +129,7 @@ export function ProjectSection({ project }: ProjectSectionProps) {
       : Pause;
 
   return (
-    <article className="project-card" data-status={cardStatus} aria-label={project.projectName}>
+    <article className="project-card" data-status={dataStatus} aria-label={project.projectName}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         {/* Card header */}
         <CollapsibleTrigger asChild>
@@ -142,15 +149,22 @@ export function ProjectSection({ project }: ProjectSectionProps) {
               )}
             />
 
-            {/* Status icon */}
-            <StatusIcon
-              className={cn(
-                "h-3.5 w-3.5 shrink-0",
-                cardStatus === "active" && "text-status-live",
-                cardStatus === "idle" && "text-muted-foreground",
-                cardStatus === "disconnected" && "text-status-error",
-              )}
-            />
+            {/* Status icon — checkmark for completed, normal icon otherwise */}
+            {isCompleted ? (
+              <CheckCircle2
+                className="h-3.5 w-3.5 shrink-0 text-status-live/60"
+                aria-label="All beads completed"
+              />
+            ) : (
+              <StatusIcon
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  cardStatus === "active" && "text-status-live",
+                  cardStatus === "idle" && "text-muted-foreground",
+                  cardStatus === "disconnected" && "text-status-error",
+                )}
+              />
+            )}
 
             {/* Project name + path */}
             <div className="min-w-0 flex-1">
@@ -162,8 +176,16 @@ export function ProjectSection({ project }: ProjectSectionProps) {
               </span>
             </div>
 
-            {/* Bead summary chips */}
-            {beadSummary.total > 0 && (
+            {/* Completed badge — replaces bead summary for completed projects */}
+            {isCompleted && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-status-live/8 px-2 py-0.5 font-mono text-[10px] font-medium text-status-live/60">
+                <CheckCircle2 className="h-2.5 w-2.5" />
+                Done
+              </span>
+            )}
+
+            {/* Bead summary chips — hidden for completed projects */}
+            {!isCompleted && beadSummary.total > 0 && (
               <div className="hidden items-center gap-1.5 sm:flex">
                 {beadSummary.active > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 font-mono text-[10px] font-medium text-status-warning">

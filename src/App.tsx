@@ -21,7 +21,6 @@ import { StatusIndicator } from "@/components/StatusIndicator";
 import { ProjectSection } from "@/components/ProjectSection";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Separator } from "@/components/ui/separator";
 import { Link2Off, ServerOff, ChevronDown, ChevronUp } from "lucide-react";
 import { FOCUS_RING } from "@/lib/styles";
 import { cn } from "@/lib/utils";
@@ -78,8 +77,19 @@ function DashboardApp() {
   const activeProjects = projects.filter((p) => !isProjectCompleted(p));
   const completedProjects = projects.filter((p) => isProjectCompleted(p));
   
-  // Projects to display based on toggle state
-  const displayedProjects = showCompleted ? projects : activeProjects;
+  // Projects to display based on toggle state, sorted by visual weight:
+  // active (connected with active pipelines) > idle (connected) > disconnected
+  const unsorted = showCompleted ? projects : activeProjects;
+  const displayedProjects = [...unsorted].sort((a, b) => {
+    const weight = (p: ProjectState) => {
+      if (!p.connected) return 0;
+      for (const pipeline of p.pipelines.values()) {
+        if (pipeline.status === "active") return 2;
+      }
+      return 1;
+    };
+    return weight(b) - weight(a);
+  });
   
   const isInitialLoad = status === "connecting" && projects.length === 0;
 
@@ -156,12 +166,9 @@ function DashboardApp() {
               projects.length === 0 && <EmptyState />}
 
             {displayedProjects.length > 0 && (
-              <div className="space-y-2">
-                {displayedProjects.map((project, index) => (
-                  <div key={project.projectPath}>
-                    {index > 0 && <Separator className="my-4" />}
-                    <ProjectSection project={project} />
-                  </div>
+              <div className="project-grid">
+                {displayedProjects.map((project) => (
+                  <ProjectSection key={project.projectPath} project={project} />
                 ))}
               </div>
             )}

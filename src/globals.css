@@ -80,6 +80,116 @@
   }
 }
 
+/* ============================================================
+   Project Card Grid Layout
+   ============================================================ */
+
+/* Responsive grid: 1 col on mobile → 2 cols → 3+ on wide screens */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 1.25rem;
+}
+
+/* On very narrow viewports, collapse to single full-width column */
+@media (max-width: 440px) {
+  .project-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Project card — self-contained with layered border treatment */
+.project-card {
+  --card-border-opacity: 0.15;
+  --card-glow-opacity: 0;
+  position: relative;
+  border-radius: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  /* Use overflow: clip instead of hidden to avoid clipping focus-visible
+     ring outlines while still containing the ::before accent bar and
+     border-radius clipping. Does not create a scroll container. */
+  overflow: clip;
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.15s ease;
+}
+
+.project-card:hover {
+  border-color: hsl(var(--border) / 0.6);
+  transform: translateY(-1px);
+}
+
+/* Active project card — strong visual presence */
+.project-card[data-status="active"] {
+  --card-border-opacity: 0.4;
+  --card-glow-opacity: 0.06;
+  border-color: hsl(142 71% 45% / var(--card-border-opacity));
+  box-shadow:
+    0 0 0 1px hsl(142 71% 45% / 0.08),
+    0 4px 16px hsl(142 71% 45% / var(--card-glow-opacity)),
+    0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.project-card[data-status="active"]:hover {
+  --card-border-opacity: 0.55;
+  --card-glow-opacity: 0.1;
+}
+
+/* Idle project card — muted, recessed */
+.project-card[data-status="idle"] {
+  opacity: 0.85;
+  border-color: hsl(var(--border));
+}
+
+.project-card[data-status="idle"]:hover {
+  opacity: 0.95;
+}
+
+/* Disconnected project card — desaturated, dimmed */
+.project-card[data-status="disconnected"] {
+  opacity: 0.6;
+  border-color: hsl(0 62% 45% / 0.2);
+  filter: saturate(0.7);
+}
+
+.project-card[data-status="disconnected"]:hover {
+  opacity: 0.75;
+  filter: saturate(0.85);
+}
+
+/* Card top accent bar — 2px color indicator */
+.project-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: hsl(var(--border));
+  transition: background 0.3s ease;
+}
+
+.project-card[data-status="active"]::before {
+  background: linear-gradient(90deg, hsl(142 71% 45% / 0.7), hsl(142 71% 45% / 0.3));
+}
+
+.project-card[data-status="idle"]::before {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+.project-card[data-status="disconnected"]::before {
+  background: hsl(0 62% 45% / 0.4);
+}
+
+/* Respect reduced-motion for card hover transforms */
+@media (prefers-reduced-motion: reduce) {
+  .project-card:hover {
+    transform: none;
+  }
+}
+
 /* Ensure scrollbar styling is consistent in dark mode */
 @layer utilities {
   .scrollbar-thin {

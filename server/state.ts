@@ -1065,6 +1065,13 @@ export class StateManager {
         this.activeAgents.set(project.projectPath, agents);
       }
       agents.add(agentName);
+
+      // Create dynamic column if one doesn't exist for this agent.
+      // Built-in agents (Build, Plan, Explore, etc.) don't have .md config
+      // files, so they won't have columns from the initial column config.
+      if (!hasColumn(project, agentName)) {
+        createDynamicColumn(project, agentName);
+      }
     }
 
     // Recompute column visibility (agent became active → may show columns)

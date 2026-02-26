@@ -921,6 +921,85 @@ describe("StateManager - agent:active / agent:idle", () => {
     expect(project.activeAgents).toContain("reviewer");
     expect(project.activeAgents.length).toBe(2);
   });
+
+  it("creates dynamic column on agent:active when column doesn't exist", () => {
+    // No "Build" column exists initially
+    const project = sm.toJSON().projects[0];
+    const hasBuildColumn = project.columns.some((c: any) => c.id === "Build");
+    expect(hasBuildColumn).toBe(false);
+
+    // Trigger agent:active for a built-in agent with no column
+    sm.processEvent("p1", "agent:active", {
+      agent: "Build",
+      sessionId: "session-1",
+      beadId: null,
+    });
+
+    // Now a "Build" column should exist
+    const updated = sm.toJSON().projects[0];
+    const buildCol = updated.columns.find((c: any) => c.id === "Build");
+    expect(buildCol).toBeDefined();
+    expect(buildCol!.type).toBe("agent");
+    expect(buildCol!.label).toBe("Build");
+    expect(buildCol!.source).toBe("dynamic");
+  });
+
+  it("does not duplicate column on repeated agent:active for same agent", () => {
+    sm.processEvent("p1", "agent:active", {
+      agent: "Build",
+      sessionId: "session-1",
+      beadId: null,
+    });
+    sm.processEvent("p1", "agent:active", {
+      agent: "Build",
+      sessionId: "session-2",
+      beadId: null,
+    });
+
+    const project = sm.toJSON().projects[0];
+    const buildCols = project.columns.filter((c: any) => c.id === "Build");
+    expect(buildCols.length).toBe(1);
+  });
+
+  it("creates dynamic column as standalone for non-pipeline agents", () => {
+    sm.processEvent("p1", "agent:active", {
+      agent: "Explore",
+      sessionId: "session-1",
+      beadId: null,
+    });
+
+    const project = sm.toJSON().projects[0];
+    const col = project.columns.find((c: any) => c.id === "Explore");
+    expect(col).toBeDefined();
+    expect(col!.group).toBe("standalone");
+  });
+
+  it("creates dynamic column as pipeline for pipeline-builder", () => {
+    sm.processEvent("p1", "agent:active", {
+      agent: "pipeline-builder",
+      sessionId: "session-1",
+      beadId: null,
+    });
+
+    const project = sm.toJSON().projects[0];
+    const col = project.columns.find((c: any) => c.id === "pipeline-builder");
+    expect(col).toBeDefined();
+    expect(col!.group).toBe("pipeline");
+  });
+
+  it("dynamic column from agent:active is included in visibleColumns", () => {
+    sm.processEvent("p1", "agent:active", {
+      agent: "Build",
+      sessionId: "session-1",
+      beadId: null,
+    });
+
+    const stateJson = sm.toJSON();
+    const project = stateJson.projects[0];
+    // visibleColumns should include the dynamic "Build" column
+    const visibleBuild = project.visibleColumns?.find((c: any) => c.id === "Build");
+    expect(visibleBuild).toBeDefined();
+  });
 });
 
 describe("StateManager - pipeline:started / pipeline:done", () => {

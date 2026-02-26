@@ -1075,7 +1075,7 @@ async function getServerStatus(): Promise<string> {
 
 export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
   const projectName = directory.split("/").pop() || "unknown";
-  log(`Plugin loaded for ${projectName} (dormant — waiting for /dashboard-start)`);
+  log(`Plugin loaded for ${projectName} — checking for existing server`);
   log(`Directory: ${directory}`);
 
   projectPath = directory;
@@ -1116,6 +1116,41 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
     );
     log("Setup not detected — commands not installed in either location");
   }
+
+  // Auto-connect to existing server if one is already running.
+  // This enables event flow (agent:active, bead:stage, etc.) without
+  // requiring the user to manually call dashboard_start each session.
+  // Fire-and-forget: don't block plugin load / hook registration.
+  (async () => {
+    try {
+      const existing = await isServerRunning(true);
+      if (!existing) {
+        log("No existing server found — staying dormant");
+        return;
+      }
+
+      log(`Found existing server (PID: ${existing.pid}, port: ${existing.port}) — auto-connecting`);
+
+      // Discover agents first (startupSequence needs discoveredAgents populated)
+      discoveredAgents = await discoverAllAgents(directory);
+      hasPipelineAgents = discoveredAgents.some((a) => a.name in PIPELINE_AGENT_ORDER);
+      log(
+        `Discovered ${discoveredAgents.length} agent(s)` +
+          (hasPipelineAgents ? " (pipeline agents present)" : " (no pipeline agents)"),
+      );
+
+      const result = await startupSequence(directory, projectName, $, existing.port);
+      if (serverReady) {
+        activated = true;
+        toast(`Auto-connected to dashboard at http://localhost:${existing.port}`, "success", "Dashboard");
+        log(`Auto-connect succeeded: ${result}`);
+      } else {
+        log(`Auto-connect failed: ${result}`);
+      }
+    } catch (err) {
+      warn("Auto-connect error:", err);
+    }
+  })();
 
   return {
     // ─── Custom Tools (LLM-callable) ──────────────────────────
@@ -1243,6 +1278,8 @@ export const DashboardPlugin: Plugin = async ({ client, directory, $ }) => {
       const sessionID = input.sessionID;
       const model = input.model;
       const agent = input.agent;
+
+      log(`chat.message: session=${sessionID} agent=${agent ?? "(none)"} model=${model ?? "(unknown)"} activated=${activated} serverReady=${serverReady}`);
 
       // Track current agent for bead:claimed stage tracking
       if (agent) {

@@ -27,15 +27,15 @@ const STATUS_CONFIG: Record<
 > = {
   active: {
     label: "LIVE",
-    className: "border-green-500/50 bg-green-500/10 text-green-400",
+    className: "border-status-live/50 bg-status-live/10 text-status-live",
   },
   idle: {
     label: "IDLE",
-    className: "border-gray-500/50 bg-gray-500/10 text-gray-400",
+    className: "border-status-idle/50 bg-status-idle/10 text-status-idle",
   },
   done: {
     label: "DONE",
-    className: "border-blue-500/50 bg-blue-500/10 text-blue-400",
+    className: "border-status-done/50 bg-status-done/10 text-status-done",
   },
 };
 
@@ -74,11 +74,11 @@ export function PipelineHeader({ pipeline, isExpanded, onToggle }: PipelineHeade
       </h3>
       <Badge
         variant="outline"
-        className={cn("text-[10px] px-2 py-0", config.className)}
+        className={cn("font-mono text-[10px] px-2 py-0", config.className)}
       >
         {config.label}
       </Badge>
-      <span className="text-xs text-muted-foreground">
+      <span className="font-mono text-xs text-muted-foreground">
         {pipeline.beads.size} bead{pipeline.beads.size !== 1 ? "s" : ""}
       </span>
     </div>

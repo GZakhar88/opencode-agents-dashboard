@@ -187,11 +187,11 @@ export function PipelineProgress({ pipeline, columns }: PipelineProgressProps) {
         {/* Batch progress counter */}
         {batchProgress.total > 0 && (
           <div className="ml-3 shrink-0 text-right">
-            <span className="text-xs font-semibold tabular-nums text-foreground">
+            <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
               {batchProgress.done}
               <span className="text-muted-foreground/70">/{batchProgress.total}</span>
             </span>
-            <span className="ml-1 text-[10px] text-muted-foreground">beads</span>
+            <span className="ml-1 font-mono text-[10px] text-muted-foreground">beads</span>
           </div>
         )}
       </div>

@@ -34,14 +34,14 @@ export function Column({ columnId, label, color, beads, columns }: ColumnProps) 
   const hasErrors = isErrorColumn && beads.length > 0;
 
   /** Shared color for error column text (icon, heading, badge) */
-  const headerColor = hasErrors ? "text-red-400" : "text-muted-foreground";
+  const headerColor = hasErrors ? "text-status-error" : "text-muted-foreground";
 
   return (
     <div
       aria-label={`${label} column with ${beads.length} bead${beads.length !== 1 ? "s" : ""}`}
       className={cn(
         "flex min-w-[200px] flex-1 flex-col rounded-lg border border-t-2 bg-muted/30",
-        hasErrors && "border-red-500/30 bg-red-500/[0.03]",
+        hasErrors && "border-status-error/30 bg-status-error/[0.03]",
       )}
       style={{
         borderTopColor: hasErrors ? undefined : color,
@@ -60,7 +60,7 @@ export function Column({ columnId, label, color, beads, columns }: ColumnProps) 
           )}
           <h3
             className={cn(
-              "text-xs font-semibold uppercase tracking-wider",
+              "font-mono text-xs font-semibold uppercase tracking-wider",
               headerColor,
             )}
           >
@@ -70,9 +70,9 @@ export function Column({ columnId, label, color, beads, columns }: ColumnProps) 
         {beads.length > 0 && (
           <span
             className={cn(
-              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-medium",
+              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-medium",
               hasErrors
-                ? "bg-red-500/15 text-red-400"
+                ? "bg-status-error/15 text-status-error"
                 : "bg-muted text-muted-foreground",
             )}
           >

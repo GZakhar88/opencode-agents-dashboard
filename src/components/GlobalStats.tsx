@@ -2,10 +2,10 @@
  * GlobalStats — Aggregate dashboard statistics for the command bar header.
  *
  * Displays color-coded metrics across all projects:
- *   - Active projects (green)
- *   - Idle projects (gray)
- *   - Beads in progress (blue)
- *   - Errors (red)
+ *   - Active projects (status-live / green)
+ *   - Idle projects (muted / gray)
+ *   - Beads in progress (status-warning / amber)
+ *   - Errors (status-error / red)
  *
  * Each stat is a compact, dense chip optimized for quick scanning.
  */
@@ -74,8 +74,8 @@ export function GlobalStats({ projects }: GlobalStatsProps) {
         icon={Activity}
         value={stats.activeProjects}
         label="active"
-        colorClass="text-green-400"
-        bgClass="bg-green-500/10"
+        colorClass="text-status-live"
+        bgClass="bg-status-live/10"
         show={stats.activeProjects > 0}
       />
       <StatChip
@@ -90,16 +90,16 @@ export function GlobalStats({ projects }: GlobalStatsProps) {
         icon={CircleDot}
         value={stats.beadsInProgress}
         label="in progress"
-        colorClass="text-blue-400"
-        bgClass="bg-blue-500/10"
+        colorClass="text-status-warning"
+        bgClass="bg-status-warning/10"
         show={stats.beadsInProgress > 0}
       />
       <StatChip
         icon={AlertTriangle}
         value={stats.totalErrors}
         label={stats.totalErrors === 1 ? "error" : "errors"}
-        colorClass="text-red-400"
-        bgClass="bg-red-500/10"
+        colorClass="text-status-error"
+        bgClass="bg-status-error/10"
         show={stats.totalErrors > 0}
         urgent
       />
@@ -130,7 +130,7 @@ function StatChip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium tabular-nums leading-none",
+        "inline-flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[11px] font-medium tabular-nums leading-none",
         bgClass,
         colorClass,
         urgent && "motion-safe:animate-pulse",

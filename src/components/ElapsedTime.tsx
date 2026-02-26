@@ -27,7 +27,7 @@ export function ElapsedTime({ startTime }: ElapsedTimeProps) {
   const elapsed = now - startTime;
 
   return (
-    <span className="text-xs tabular-nums text-muted-foreground">
+    <span className="font-mono text-xs tabular-nums text-muted-foreground">
       {formatElapsed(elapsed)}
     </span>
   );

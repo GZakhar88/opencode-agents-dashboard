@@ -146,9 +146,9 @@ export function ProjectSection({ project }: ProjectSectionProps) {
             <StatusIcon
               className={cn(
                 "h-3.5 w-3.5 shrink-0",
-                cardStatus === "active" && "text-green-400",
+                cardStatus === "active" && "text-status-live",
                 cardStatus === "idle" && "text-muted-foreground",
-                cardStatus === "disconnected" && "text-red-400",
+                cardStatus === "disconnected" && "text-status-error",
               )}
             />
 
@@ -157,7 +157,7 @@ export function ProjectSection({ project }: ProjectSectionProps) {
               <h2 className="truncate text-sm font-semibold text-foreground">
                 {project.projectName}
               </h2>
-              <span className="block truncate text-[11px] text-muted-foreground/70">
+              <span className="block truncate font-mono text-[11px] text-muted-foreground/70">
                 {project.projectPath}
               </span>
             </div>
@@ -166,17 +166,17 @@ export function ProjectSection({ project }: ProjectSectionProps) {
             {beadSummary.total > 0 && (
               <div className="hidden items-center gap-1.5 sm:flex">
                 {beadSummary.active > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-400">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 font-mono text-[10px] font-medium text-status-warning">
                     {beadSummary.active} active
                   </span>
                 )}
                 {beadSummary.done > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-400">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-status-live/10 px-2 py-0.5 font-mono text-[10px] font-medium text-status-live">
                     {beadSummary.done} done
                   </span>
                 )}
                 {beadSummary.error > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-400">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-status-error/10 px-2 py-0.5 font-mono text-[10px] font-medium text-status-error">
                     {beadSummary.error} err
                   </span>
                 )}
@@ -250,9 +250,9 @@ function ConnectionBadge({
     return (
       <Badge
         variant="outline"
-        className="shrink-0 gap-1.5 border-green-500/50 bg-green-500/10 text-green-400"
+        className="shrink-0 gap-1.5 font-mono text-[11px] border-status-live/50 bg-status-live/10 text-status-live"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+        <span className="h-1.5 w-1.5 rounded-full bg-status-live" />
         Connected
       </Badge>
     );
@@ -261,9 +261,9 @@ function ConnectionBadge({
   return (
     <Badge
       variant="outline"
-      className="shrink-0 gap-1.5 border-red-500/50 bg-red-500/10 text-red-400"
+      className="shrink-0 gap-1.5 font-mono text-[11px] border-status-error/50 bg-status-error/10 text-status-error"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+      <span className="h-1.5 w-1.5 rounded-full bg-status-error" />
       <span className="hidden sm:inline">Disconnected ·</span> {formatLastSeen(lastHeartbeat)}
     </Badge>
   );

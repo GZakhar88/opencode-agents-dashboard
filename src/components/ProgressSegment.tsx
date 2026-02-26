@@ -100,7 +100,7 @@ export function ProgressSegment({
       <div className="flex items-center gap-1">
         <span
           className={cn(
-            "text-[10px] font-medium uppercase tracking-wider transition-colors duration-200",
+            "font-mono text-[10px] font-medium uppercase tracking-wider transition-colors duration-200",
             isActive && "text-foreground",
             isCompleted && "text-muted-foreground",
             isUpcoming && "text-muted-foreground/50",
@@ -111,7 +111,7 @@ export function ProgressSegment({
         {beadCount > 0 && (
           <span
             className={cn(
-              "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold tabular-nums",
+              "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-[9px] font-semibold tabular-nums",
               isActive && "text-foreground",
               isCompleted && "text-muted-foreground",
               isUpcoming && "text-muted-foreground/50",

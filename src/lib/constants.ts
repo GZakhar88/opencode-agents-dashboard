@@ -20,11 +20,11 @@ export const DEFAULT_COLUMNS: ColumnConfig[] = [
 
 /** Priority color classes (Tailwind) — used for pill badges (e.g. ActiveBeadLabel) */
 export const PRIORITY_COLORS: Record<number, string> = {
-  0: "bg-red-500 text-white",       // P0 - Critical
-  1: "bg-orange-500 text-white",    // P1 - High
-  2: "bg-blue-500 text-white",      // P2 - Medium
-  3: "bg-gray-500 text-white",      // P3 - Low
-  4: "bg-gray-400 text-white",      // P4 - Lowest
+  0: "bg-status-error text-white",       // P0 - Critical
+  1: "bg-status-warning text-white",     // P1 - High
+  2: "bg-status-done text-white",        // P2 - Medium
+  3: "bg-status-idle text-white",        // P3 - Low
+  4: "bg-status-idle/70 text-white",     // P4 - Lowest
 };
 
 /** Priority border colors (CSS values) — used for left-border card treatment */
@@ -62,11 +62,11 @@ export const ISSUE_TYPE_LABELS: Record<string, string> = {
  * Provides quick visual differentiation between issue categories.
  */
 export const ISSUE_TYPE_COLORS: Record<string, string> = {
-  bug: "text-red-400",
+  bug: "text-status-error",
   feature: "text-violet-400",
-  task: "text-blue-400",
-  epic: "text-amber-400",
-  chore: "text-gray-400",
+  task: "text-status-done",
+  epic: "text-status-warning",
+  chore: "text-status-idle",
   decision: "text-teal-400",
 };
 

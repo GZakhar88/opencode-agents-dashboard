@@ -22,23 +22,23 @@ const STATUS_CONFIG: Record<
 > = {
   connecting: {
     label: "Connecting",
-    className: "border-amber-500/50 bg-amber-500/10 text-amber-400",
-    dot: "bg-amber-400 animate-pulse",
+    className: "border-status-warning/50 bg-status-warning/10 text-status-warning",
+    dot: "bg-status-warning animate-pulse",
   },
   connected: {
     label: "Connected",
-    className: "border-green-500/50 bg-green-500/10 text-green-400",
-    dot: "bg-green-400",
+    className: "border-status-live/50 bg-status-live/10 text-status-live",
+    dot: "bg-status-live",
   },
   reconnecting: {
     label: "Reconnecting",
-    className: "border-amber-500/50 bg-amber-500/10 text-amber-400",
-    dot: "bg-amber-400 animate-pulse",
+    className: "border-status-warning/50 bg-status-warning/10 text-status-warning",
+    dot: "bg-status-warning animate-pulse",
   },
   disconnected: {
     label: "Disconnected",
-    className: "border-red-500/50 bg-red-500/10 text-red-400",
-    dot: "bg-red-400",
+    className: "border-status-error/50 bg-status-error/10 text-status-error",
+    dot: "bg-status-error",
   },
 };
 
@@ -46,7 +46,7 @@ export function StatusIndicator({ status }: StatusIndicatorProps) {
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.disconnected;
 
   return (
-    <Badge variant="outline" className={cn("gap-1.5", config.className)}>
+    <Badge variant="outline" className={cn("gap-1.5 font-mono text-[11px]", config.className)}>
       <span className={cn("h-2 w-2 rounded-full", config.dot)} />
       {config.label}
     </Badge>

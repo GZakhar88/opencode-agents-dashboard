@@ -187,8 +187,8 @@ function DisconnectedState({ onReconnect }: { onReconnect: () => void }) {
       role="alert"
       className="flex flex-col items-center justify-center py-24"
     >
-      <div className="mb-4 rounded-full bg-red-500/10 p-4">
-        <ServerOff className="h-8 w-8 text-red-400" />
+      <div className="mb-4 rounded-full bg-status-error/10 p-4">
+        <ServerOff className="h-8 w-8 text-status-error" />
       </div>
       <h2 className="mb-1 text-lg font-semibold text-foreground">
         Unable to connect to server
@@ -267,7 +267,7 @@ function CompletedToggle({
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-          showCompleted && "border-green-500/30 text-foreground",
+          showCompleted && "border-status-live/30 text-foreground",
           FOCUS_RING,
         )}
         aria-expanded={isDropdownOpen}
@@ -275,15 +275,15 @@ function CompletedToggle({
         aria-label={`${showCompleted ? "Showing" : "Hiding"} ${count} completed project${count !== 1 ? "s" : ""}`}
       >
         {showCompleted ? (
-          <Eye className="h-3 w-3 text-green-400" />
+          <Eye className="h-3 w-3 text-status-live" />
         ) : (
           <EyeOff className="h-3 w-3" />
         )}
         <span className="hidden sm:inline">Completed</span>
         <span className={cn(
-          "inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums leading-none",
+          "inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 font-mono text-[10px] font-semibold tabular-nums leading-none",
           showCompleted
-            ? "bg-green-500/15 text-green-400"
+            ? "bg-status-live/15 text-status-live"
             : "bg-muted text-muted-foreground",
         )}>
           {count}
@@ -318,7 +318,7 @@ function CompletedToggle({
             <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
             <span>Hide completed</span>
             {!showCompleted && (
-              <span className="ml-auto text-[10px] text-green-400">✓</span>
+              <span className="ml-auto text-[10px] text-status-live">✓</span>
             )}
           </button>
           <button
@@ -335,13 +335,13 @@ function CompletedToggle({
               FOCUS_RING,
             )}
           >
-            <Eye className="h-3.5 w-3.5 text-green-400" />
+            <Eye className="h-3.5 w-3.5 text-status-live" />
             <span>Show completed</span>
             <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
               {count}
             </span>
             {showCompleted && (
-              <span className="text-[10px] text-green-400">✓</span>
+              <span className="text-[10px] text-status-live">✓</span>
             )}
           </button>
         </div>

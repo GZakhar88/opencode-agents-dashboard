@@ -61,11 +61,11 @@ export class ErrorBoundary extends Component<
           role="alert"
           className="flex min-h-screen items-center justify-center bg-background p-6"
         >
-          <div className="w-full max-w-md rounded-lg border border-red-500/30 bg-red-500/5 p-6">
+          <div className="w-full max-w-md rounded-lg border border-status-error/30 bg-status-error/5 p-6">
             {/* Icon */}
             <div className="mb-4 flex justify-center">
-              <div className="rounded-full bg-red-500/10 p-3">
-                <AlertTriangle className="h-8 w-8 text-red-400" />
+              <div className="rounded-full bg-status-error/10 p-3">
+                <AlertTriangle className="h-8 w-8 text-status-error" />
               </div>
             </div>
 
@@ -84,7 +84,7 @@ export class ErrorBoundary extends Component<
                 <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                   Error details
                 </summary>
-                <pre className="mt-2 overflow-auto text-xs text-red-400">
+                <pre className="mt-2 overflow-auto font-mono text-xs text-status-error">
                   {this.state.error.message}
                   {this.state.errorInfo?.componentStack && (
                     <>

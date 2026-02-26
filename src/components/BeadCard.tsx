@@ -65,10 +65,10 @@ const cardTransition = {
 
 /** Error card: red border, subtle glow, ring highlight */
 const ERROR_CARD_STYLES =
-  "border-red-500/60 bg-red-500/5 ring-1 ring-red-500/20 shadow-[0_0_8px_rgba(239,68,68,0.1)]";
+  "border-status-error/60 bg-status-error/5 ring-1 ring-status-error/20 shadow-[0_0_8px_rgba(239,68,68,0.1)]";
 
-/** Active agent card: blue ring + animated glow pulse */
-const ACTIVE_CARD_STYLES = "ring-1 ring-blue-400/60 animate-agent-pulse";
+/** Active agent card: amber ring + animated glow pulse */
+const ACTIVE_CARD_STYLES = "ring-1 ring-status-warning/60 animate-agent-pulse";
 
 /** Map issue type string to Lucide icon component */
 const ISSUE_TYPE_ICON_MAP: Record<string, LucideIcon> = {
@@ -172,7 +172,7 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
         isActive && !isError && ACTIVE_CARD_STYLES,
       )}
       style={{
-        borderLeftColor: isError ? "#ef4444" : priorityBorderColor,
+        borderLeftColor: isError ? "hsl(var(--status-error))" : priorityBorderColor,
       }}
     >
       {/* Row 1: Issue type icon + title + priority label */}
@@ -218,9 +218,9 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
           {showElapsed && (
             <span
               className={cn(
-                "tabular-nums",
+                "font-mono tabular-nums",
                 isActive
-                  ? "text-sm font-semibold text-blue-400 animate-elapsed-pulse"
+                  ? "text-sm font-semibold text-status-warning animate-elapsed-pulse"
                   : "text-xs text-muted-foreground",
               )}
             >
@@ -228,7 +228,7 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
             </span>
           )}
           {isError && (
-            <span className="flex items-center gap-1 text-[10px] font-medium text-red-400">
+            <span className="flex items-center gap-1 font-mono text-[10px] font-medium text-status-error">
               <AlertCircle className="h-3 w-3" />
               Error
             </span>
@@ -238,7 +238,7 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
 
       {/* Error message preview (visible directly on card) */}
       {isError && bead.error && (
-        <p className="mt-1.5 line-clamp-2 break-words rounded bg-red-500/10 px-1.5 py-1 text-[10px] leading-tight text-red-400">
+        <p className="mt-1.5 line-clamp-2 break-words rounded bg-status-error/10 px-1.5 py-1 font-mono text-[10px] leading-tight text-status-error">
           {bead.error}
         </p>
       )}
@@ -250,10 +250,10 @@ export function BeadCard({ bead, columns }: BeadCardProps) {
   const tooltipContent = isError && bead.error ? (
     <TooltipContent
       side="top"
-      className="max-w-xs border-red-500/30 bg-popover"
+      className="max-w-xs border-status-error/30 bg-popover"
     >
       <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-error" />
         <div>
           <p className="mb-1 font-mono text-[10px] text-muted-foreground">
             {bead.id}

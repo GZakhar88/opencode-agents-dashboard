@@ -321,7 +321,11 @@ function deserializeStateFull(payload: unknown): DashboardState {
       connected: projectData.connected !== false, // default to true
       pipelines,
       lastBeadSnapshot: (projectData.lastBeadSnapshot as BeadRecord[]) || [],
-      columns: (projectData.columns as ColumnConfig[]) || [],
+      // Prefer visibleColumns (server-computed visible subset) over columns
+      // (full set from agent discovery). The server's toJSON() sends both.
+      columns: Array.isArray(projectData.visibleColumns)
+        ? (projectData.visibleColumns as ColumnConfig[])
+        : (projectData.columns as ColumnConfig[]) || [],
     });
   }
 
@@ -694,11 +698,21 @@ function boardReducer(
 
     // ----- Columns update — store dynamic column config for a project -----
     case "COLUMNS_UPDATE": {
-      const { projectPath, columns } = action.payload;
-      if (!projectPath || !Array.isArray(columns)) return state;
+      const { projectPath, visibleColumns, columns } = action.payload;
+      if (!projectPath) return state;
+
+      // The SSE bridge sends `visibleColumns`; the raw plugin event sends
+      // `columns`. Accept whichever is present, preferring visibleColumns.
+      const resolvedColumns = Array.isArray(visibleColumns)
+        ? visibleColumns
+        : Array.isArray(columns)
+          ? columns
+          : null;
+
+      if (!resolvedColumns) return state;
 
       const { project, projects } = ensureProject(state.projects, projectPath);
-      project.columns = columns;
+      project.columns = resolvedColumns;
 
       return { projects };
     }

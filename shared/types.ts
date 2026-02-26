@@ -135,6 +135,7 @@ export interface ProjectState {
   pipelines: Map<string, Pipeline>;
   lastBeadSnapshot: BeadRecord[];
   columns: ColumnConfig[]; // dynamic column layout from agent discovery
+  activeAgents?: string[]; // currently active agent names (serialized form of Set<string>)
 }
 
 // ============================================================
@@ -230,19 +231,19 @@ export interface BeadRemovedPayload extends BaseEventPayload {
   beadId: string;
 }
 
-/** agent:active — child agent session created and mapped to pipeline stage */
+/** agent:active — agent session started (subagent child session or primary built-in agent) */
 export interface AgentActivePayload extends BaseEventPayload {
   agent: string; // agent name
   sessionId: string;
-  parentSessionId: string;
-  beadId: string;
+  parentSessionId?: string; // present for subagent sessions, absent for primary agents
+  beadId: string | null;
 }
 
-/** agent:idle — child agent session finished work */
+/** agent:idle — agent session finished work (subagent or primary built-in agent) */
 export interface AgentIdlePayload extends BaseEventPayload {
   agent: string; // agent name
   sessionId: string;
-  beadId: string;
+  beadId: string | null;
 }
 
 /** beads:refreshed — summary after bead state refresh */
@@ -262,9 +263,16 @@ export interface PipelineDonePayload extends BaseEventPayload {
   pipelineId: string;
 }
 
-/** columns:update — plugin sends column configuration for the project */
+/** columns:update — server broadcasts visible column set for the project.
+ *
+ * The SSE bridge in routes.ts sends `visibleColumns` (the subset currently
+ * visible based on active pipelines / agents). The original plugin payload
+ * uses `columns` (full set). The reducer accepts either field so it works
+ * with both the SSE bridge and the raw plugin event.
+ */
 export interface ColumnsUpdatePayload extends BaseEventPayload {
-  columns: ColumnConfig[];
+  columns?: ColumnConfig[];
+  visibleColumns?: ColumnConfig[];
 }
 
 /** Map of event type to its payload type */
@@ -399,4 +407,6 @@ export interface ColumnConfig {
   type: "status" | "agent"; // bookend vs agent column
   color: string; // hex color for accent border (e.g., "#8b5cf6")
   order: number; // position in board (0-based)
+  group?: "pipeline" | "standalone"; // visibility logic grouping for pipeline columns
+  source?: "discovered" | "dynamic"; // how the column was created (debugging/logging)
 }

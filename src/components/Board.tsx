@@ -23,9 +23,11 @@ interface BoardProps {
 }
 
 export function Board({ pipeline, isExpanded, columns }: BoardProps) {
-  // Use provided columns or fall back to defaults
-  const columnConfig =
-    columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  // Use provided columns when available. Fall back to default bookend
+  // columns (ready, done, error) when no config exists or when the
+  // visible column set is empty (no agents active yet). This ensures
+  // the board always shows at least the status bookends.
+  const columnConfig = columns !== undefined && columns.length > 0 ? columns : DEFAULT_COLUMNS;
 
   // Sort columns by order
   const sortedColumns = [...columnConfig].sort((a, b) => a.order - b.order);

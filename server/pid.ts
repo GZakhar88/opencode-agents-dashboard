@@ -8,7 +8,7 @@
  * Contents: JSON { pid, port, startedAt }
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, truncateSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 
@@ -18,16 +18,49 @@ export interface PidFileData {
   pid: number;
   port: number;
   startedAt: string; // ISO timestamp
+  buildHash?: string; // 12-char hex hash of source files (optional for backward compat)
 }
 
 // --- PID file path ---
 
 const PID_DIR = join(homedir(), ".cache", "opencode");
 const PID_FILE = join(PID_DIR, "opencode-dashboard.pid");
+const LOG_FILE = join(PID_DIR, "opencode-dashboard.log");
+
+const MAX_LOG_SIZE_BYTES = 1_048_576; // 1 MB
 
 /** Get the PID file path (exposed for testing) */
 export function getPidFilePath(): string {
   return PID_FILE;
+}
+
+/** Get the server log file path */
+export function getLogFilePath(): string {
+  return LOG_FILE;
+}
+
+/**
+ * Prepare the server log file for writing.
+ * Ensures the directory exists and truncates the file if it exceeds 1 MB.
+ * Returns a file descriptor opened in append mode, suitable for Bun.spawn stdio.
+ */
+export function openLogFile(): number {
+  if (!existsSync(PID_DIR)) {
+    mkdirSync(PID_DIR, { recursive: true });
+  }
+
+  // Simple size management: truncate if over 1 MB
+  try {
+    const st = statSync(LOG_FILE);
+    if (st.size > MAX_LOG_SIZE_BYTES) {
+      truncateSync(LOG_FILE, 0);
+    }
+  } catch {
+    // File doesn't exist yet — that's fine
+  }
+
+  // Open in append mode, create if not exists
+  return openSync(LOG_FILE, "a");
 }
 
 // --- Write ---
@@ -36,7 +69,7 @@ export function getPidFilePath(): string {
  * Write PID file when the server starts.
  * Creates the directory if it doesn't exist.
  */
-export function writePid(pid: number, port: number): void {
+export function writePid(pid: number, port: number, buildHash?: string): void {
   if (!existsSync(PID_DIR)) {
     mkdirSync(PID_DIR, { recursive: true });
   }
@@ -44,6 +77,7 @@ export function writePid(pid: number, port: number): void {
     pid,
     port,
     startedAt: new Date().toISOString(),
+    ...(buildHash ? { buildHash } : {}),
   };
   writeFileSync(PID_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
@@ -71,12 +105,19 @@ export function readPid(): PidFileData | null {
 
 /**
  * Remove PID file on graceful shutdown or after stopping the server.
+ *
+ * When `ownPid` is provided, the file is only deleted if it still belongs
+ * to that process. This prevents a shutting-down server from accidentally
+ * removing a *new* server's PID file written during a restart race.
  */
-export function removePid(): void {
+export function removePid(ownPid?: number): void {
   try {
-    if (existsSync(PID_FILE)) {
-      unlinkSync(PID_FILE);
+    if (!existsSync(PID_FILE)) return;
+    if (ownPid !== undefined) {
+      const current = readPid();
+      if (current && current.pid !== ownPid) return; // PID file belongs to a newer server
     }
+    unlinkSync(PID_FILE);
   } catch {
     // Ignore errors (file may already be gone)
   }
